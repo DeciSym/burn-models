@@ -12,7 +12,7 @@ We follow **Test-Driven Development (TDD)** principles:
 
 ## Progress
 
-### Phase 1: Core Components (Weeks 1-4) - IN PROGRESS
+### Phase 1: Core Components (Weeks 1-4) - 50% COMPLETE
 #### Week 1 ✅ COMPLETED
 - ✅ **Attention Module** (`src/model/attention.rs`)
   - Implemented `GraniteMoeHybridAttention` with GQA support
@@ -32,15 +32,21 @@ We follow **Test-Driven Development (TDD)** principles:
   - Validation logic
   - Tests passing
 
-#### Week 2: Mamba Implementation
-- ⏳ **Simple Mamba Module** (`src/model/mamba.rs`) - IN PROGRESS
+#### Week 2: Mamba Implementation ✅ COMPLETED
+- ✅ **Simple Mamba Module** (`src/model/mamba.rs`)
   - [x] Write tests for SSM forward pass
   - [x] Implement basic state space model structure
   - [x] Add convolution layer
-  - [ ] Implement selective scan algorithm (basic version)
+  - [x] Implement selective scan algorithm (basic version)
   - [x] Ensure tests pass on both backends
   
-  **Status**: Basic Mamba module implemented with input/output projections, 1D causal convolution, and simple gating. Full SSM computation (A, B, C, D matrices) still pending.
+  **Status**: Complete Mamba module implemented with:
+  - Input/output projections
+  - 1D causal convolution with proper padding
+  - Selective scan algorithm with state space computation
+  - SiLU activation and gating mechanisms
+  - Full SSM computation with A, B, C, delta parameters
+  - Tests passing on both CPU (ndarray) and GPU (tch-gpu on AMD MI210)
 
 #### Week 2.5: MoE Router
 - ⏳ **MoE Router** (`src/model/moe.rs`)
@@ -149,20 +155,20 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
 
 ## Phase 1: Core Components (Week 1-2)
 
-### 1. Attention Module (`src/model/attention.rs`)
+### 1. Attention Module (`src/model/attention.rs`) ✅ COMPLETED
 - Implement `GraniteMoeHybridAttention` with:
-  - Grouped Query Attention (GQA) support
-  - No positional encoding (NoPE)
-  - RMSNorm layer normalization
-  - KV-cache support
+  - Grouped Query Attention (GQA) support ✅
+  - No positional encoding (NoPE) ✅
+  - RMSNorm layer normalization ✅
+  - KV-cache support ✅
 
-### 2. Mamba State Space Module (`src/model/mamba.rs`) ✓
+### 2. Mamba State Space Module (`src/model/mamba.rs`) ✅ COMPLETED
 - Implement `GraniteMoeHybridMambaLayer` with:
-  - SSM parameters (A, B, C, D matrices) ✓
-  - Time step (∆) computation ✓
-  - State evolution logic ✓
-  - Selective scan algorithm ✓
-  - Gated MLP with SiLU activation ✓ (Note: Using SiLU instead of SwiGLU for mamba module)
+  - SSM parameters (A, B, C, D matrices) ✅
+  - Time step (∆) computation ✅
+  - State evolution logic ✅
+  - Selective scan algorithm ✅
+  - Gated MLP with SiLU activation ✅ (Note: Using SiLU instead of SwiGLU for mamba module)
 
 ### 3. Mixture of Experts (`src/model/moe.rs`)
 - Implement `GraniteMoeHybridMoE` with:
@@ -171,10 +177,11 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - 64 expert FFN blocks
   - Load balancing auxiliary loss
 
-### 4. Base Components (`src/model/components.rs`)
-- `GraniteMoeHybridRMSNorm`: RMS normalization
-- `RotaryPositionalEncoding`: If needed for compatibility
-- SwiGLU activation function
+### 4. Base Components (`src/model/components.rs`) ✅ COMPLETED
+- `GraniteMoeHybridRMSNorm`: RMS normalization ✅
+- `RotaryPositionalEncoding`: Not needed (using NoPE) ✅
+- SwiGLU activation function ✅
+- SiLU activation function ✅
 
 ## Phase 2: Model Assembly (Week 3)
 
