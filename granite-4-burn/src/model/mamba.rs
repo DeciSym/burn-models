@@ -10,6 +10,8 @@ use burn::{
     tensor::activation,
 };
 
+use super::components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig};
+
 #[derive(Config)]
 pub struct GraniteMoeHybridMambaConfig {
     pub hidden_size: usize,
@@ -28,15 +30,20 @@ impl GraniteMoeHybridMambaConfig {
         let mamba_intermediate = self.mamba_expand * self.hidden_size;
         
         // Input projection to expand hidden size
-        let in_proj = LinearConfig::new(self.hidden_size, mamba_intermediate * 2)
+        // Note: The actual projection size includes dt projection
+        let dt_out_channels = self.mamba_n_heads; // 48 in Granite-4
+        let in_proj_size = mamba_intermediate * 2 + dt_out_channels;
+        let in_proj = LinearConfig::new(self.hidden_size, in_proj_size)
             .with_bias(self.mamba_proj_bias)
             .init(device);
         
         // 1D convolution
-        let conv1d = Conv1dConfig::new(mamba_intermediate, mamba_intermediate, self.mamba_d_conv)
+        // The actual conv channels is intermediate + dt
+        let conv_channels = mamba_intermediate + dt_out_channels;
+        let conv1d = Conv1dConfig::new(conv_channels, conv_channels, self.mamba_d_conv)
             .with_padding(PaddingConfig1d::Explicit(self.mamba_d_conv - 1))  // Causal padding
             .with_bias(self.mamba_conv_bias)
-            .with_groups(mamba_intermediate)  // Depthwise convolution
+            .with_groups(conv_channels)  // Depthwise convolution
             .init(device);
         
         // Output projection back to hidden size
@@ -44,15 +51,31 @@ impl GraniteMoeHybridMambaConfig {
             .with_bias(self.mamba_proj_bias)
             .init(device);
         
+        // State space parameters
+        let dt_bias = Tensor::zeros([dt_out_channels], device);
+        let a_log = Tensor::ones([dt_out_channels], device).mul_scalar(-5.0); // Initialize with negative values
+        let d_param = Tensor::ones([dt_out_channels], device);
+        
+        // Normalization layer
+        let norm = GraniteMoeHybridRMSNormConfig {
+            dim: mamba_intermediate,
+            eps: 1e-5,
+        }.init(device);
+        
         GraniteMoeHybridMamba {
             in_proj,
             conv1d,
             out_proj,
+            norm,
+            dt_bias,
+            a_log,
+            d_param,
             hidden_size: self.hidden_size,
             mamba_expand: self.mamba_expand,
             mamba_d_state: self.mamba_d_state,
             mamba_n_heads: self.mamba_n_heads,
             mamba_d_head: self.mamba_d_head,
+            dt_out_channels,
         }
     }
 }
@@ -60,11 +83,17 @@ impl GraniteMoeHybridMambaConfig {
 #[derive(Module, Debug)]
 pub struct GraniteMoeHybridMamba<B: Backend> {
     /// Input projection
-    in_proj: Linear<B>,
+    pub in_proj: Linear<B>,
     /// 1D convolution
-    conv1d: Conv1d<B>,
+    pub conv1d: Conv1d<B>,
     /// Output projection
-    out_proj: Linear<B>,
+    pub out_proj: Linear<B>,
+    /// Normalization layer
+    pub norm: GraniteMoeHybridRMSNorm<B>,
+    /// State space parameters
+    pub dt_bias: Tensor<B, 1>,
+    pub a_log: Tensor<B, 1>,
+    pub d_param: Tensor<B, 1>,
     /// Hidden size
     hidden_size: usize,
     /// Mamba expand factor
@@ -75,6 +104,8 @@ pub struct GraniteMoeHybridMamba<B: Backend> {
     mamba_n_heads: usize,
     /// Head dimension
     mamba_d_head: usize,
+    /// Delta time channels
+    dt_out_channels: usize,
 }
 
 impl<B: Backend> GraniteMoeHybridMamba<B> {
@@ -82,19 +113,21 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
         let [batch_size, seq_len, _] = hidden_states.dims();
         let device = hidden_states.device();
         
-        // Input projection: expand to 2 * mamba_intermediate
+        // Input projection: expand to intermediate*2 + dt_out_channels
         let proj_states = self.in_proj.forward(hidden_states);
         
-        // Split into main path and gate
+        // Split into conv input, gate, and delta time projection  
         let mamba_intermediate = self.mamba_expand * self.hidden_size;
-        let (hidden_states, gate) = (
-            proj_states.clone().slice([0..batch_size, 0..seq_len, 0..mamba_intermediate]),
-            proj_states.slice([0..batch_size, 0..seq_len, mamba_intermediate..2*mamba_intermediate]),
-        );
+        let conv_input = proj_states.clone().slice([0..batch_size, 0..seq_len, 0..mamba_intermediate]);
+        let gate = proj_states.clone().slice([0..batch_size, 0..seq_len, mamba_intermediate..2*mamba_intermediate]);
+        let dt_proj = proj_states.slice([0..batch_size, 0..seq_len, 2*mamba_intermediate..2*mamba_intermediate+self.dt_out_channels]);
+        
+        // Combine conv_input and dt for convolution
+        let conv_states = Tensor::cat(vec![conv_input, dt_proj.clone()], 2);
         
         // Apply 1D convolution (causal)
         // Convert from [batch, seq, channels] to [batch, channels, seq] for conv1d
-        let conv_states = hidden_states.swap_dims(1, 2);
+        let conv_states = conv_states.swap_dims(1, 2);
         let conv_states = self.conv1d.forward(conv_states);
         // Convert back to [batch, seq, channels]
         let conv_states = conv_states.swap_dims(1, 2);
@@ -102,29 +135,46 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
         // Slice to remove right padding (causal convolution)
         let [_, conv_seq_len, _] = conv_states.dims();
         let conv_states = if conv_seq_len > seq_len {
-            conv_states.slice([0..batch_size, 0..seq_len, 0..mamba_intermediate])
+            conv_states.slice([0..batch_size, 0..seq_len, 0..mamba_intermediate + self.dt_out_channels])
         } else {
             conv_states
         };
         
-        // Apply SiLU activation
-        let conv_states = conv_states.clone() * activation::sigmoid(conv_states);
+        // Split convolution output
+        let x_conv = conv_states.clone().slice([0..batch_size, 0..seq_len, 0..mamba_intermediate]);
+        let dt_conv = conv_states.slice([0..batch_size, 0..seq_len, mamba_intermediate..mamba_intermediate + self.dt_out_channels]);
         
-        // Create SSM parameters (in real implementation these would be learned)
-        // For now, let's create simple parameters for testing
-        let a = Tensor::ones([mamba_intermediate, self.mamba_d_state], &device).mul_scalar(-5.0);
-        let b = Tensor::ones([batch_size, seq_len, self.mamba_d_state], &device);
-        let c = Tensor::ones([batch_size, seq_len, self.mamba_d_state], &device);
-        let delta = Tensor::ones([batch_size, seq_len, mamba_intermediate], &device);
+        // Apply SiLU activation to main path
+        let x_conv = x_conv.clone() * activation::sigmoid(x_conv);
         
-        // Apply selective scan
-        let ssm_states = selective_scan(conv_states, a, b, c, delta);
+        // Process time deltas
+        let delta = (dt_conv + self.dt_bias.clone().unsqueeze()).exp();
+        
+        // Apply normalization
+        let x_norm = self.norm.forward(x_conv);
+        
+        // Create SSM matrices using learned parameters
+        let a = self.a_log.clone().exp(); // Convert from log space
+        let b = x_norm.clone(); // Use normalized input as B matrix
+        let c = x_norm.clone(); // Use normalized input as C matrix
+        // D parameter needs to be expanded to match batch and sequence dimensions
+        let d = self.d_param.clone()
+            .reshape([1, 1, self.dt_out_channels])
+            .expand([batch_size, seq_len, self.dt_out_channels]);
+
+        // TODO: Apply selective scan
+        // For now, just use identity
+        let ssm_states = x_norm;
         
         // Combine with gate
         let gated_states = ssm_states * activation::sigmoid(gate);
         
+        // Add multiplicative skip connection with D parameter
+        // D parameter is for dt pathway, need to broadcast properly
+        let y = gated_states; // For now, skip the D parameter multiplication
+        
         // Output projection back to hidden_size
-        let output = self.out_proj.forward(gated_states);
+        let output = self.out_proj.forward(y);
         
         output
     }
