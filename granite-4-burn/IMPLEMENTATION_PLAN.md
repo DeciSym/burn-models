@@ -110,11 +110,15 @@ We follow **Test-Driven Development (TDD)** principles:
    - [ ] Implement complete model
    - [ ] Memory optimization for long contexts
 
-2. **Weight Loading**
-   - [ ] Write tests for weight conversion
-   - [ ] Implement HuggingFace weight loader
-   - [ ] Handle BF16 precision conversion
-   - [ ] Validate loaded weights
+2. **Weight Loading** ✅ PARTIALLY COMPLETE
+   - [x] Write tests for weight conversion
+   - [x] Implement HuggingFace weight loader with safetensors
+   - [x] Handle BF16 precision conversion
+   - [x] Implement embeddings weight loading
+   - [x] Implement attention weight loading  
+   - [x] Implement Mamba weight loading with all parameters
+   - [ ] Implement MoE weight loading (structure differs)
+   - [ ] Validate loaded weights with forward pass
 
 ### Phase 4: Inference & Generation (Week 7)
 - **Text Generation**

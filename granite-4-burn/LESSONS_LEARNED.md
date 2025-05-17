@@ -119,3 +119,53 @@ Updated: 2025-01-17
 - **Masked Operations**: Use element-wise multiplication for masking
 - **Accumulation**: Simple addition for accumulating expert outputs
 - **Efficiency**: Process all tokens through expert, let zeros handle inactivity
+
+## Weight Loading Insights
+
+### 1. Model Architecture Mismatch
+- **HuggingFace Structure**: Uses `block_sparse_moe` and `shared_mlp` for FFN layers
+- **Our Structure**: Single unified MoE FFN for all layers
+- **Challenge**: Need to map different weight structures during loading
+- **Lesson**: Always verify model architecture assumptions early
+
+### 2. Test-Driven Weight Loading
+- **Weight Discovery**: Used tests to explore actual weight names and shapes
+- **Missing Parameters**: Tests revealed missing Mamba state space parameters
+- **Approach**: Write tests to understand data before implementing loaders
+- **Benefit**: Caught dimension mismatches and missing components early
+
+### 3. Dimension and Transposition Issues
+- **HuggingFace Format**: Weights are often transposed compared to Burn expectations
+- **Example**: Linear weights need `.transpose()` when loading
+- **Conv1D**: Requires special handling for 3D tensor shapes
+- **Solution**: Always validate tensor dimensions in tests
+
+### 4. BFloat16 Conversion
+- **Format**: HuggingFace uses bfloat16 for storage efficiency
+- **Challenge**: Burn requires f32, need proper conversion
+- **Implementation**: Manual bit manipulation for bfloat16 to f32
+- **Validation**: Test with known values to ensure conversion accuracy
+
+### 5. Modular Field Access
+- **Problem**: Private fields prevented weight loading access
+- **Solution**: Made necessary fields public for loader access
+- **Trade-off**: Slightly less encapsulation for practical loading needs
+- **Alternative**: Could use builder pattern or friend modules
+
+### 6. State Space Parameters
+- **Discovery**: Mamba has additional parameters (A_log, D, dt_bias, norm)
+- **Integration**: Added these to the Mamba module structure
+- **Initialization**: Need proper initial values (e.g., A_log starts at -5.0)
+- **Testing**: Verify parameter shapes match HuggingFace expectations
+
+### 7. Layer Type Mapping
+- **HuggingFace**: Uses "mamba" and "attention" as primary layer types
+- **FFN Types**: Additionally has "shared_mlp" vs "block_sparse_moe" 
+- **Our Model**: Simpler unified structure
+- **Lesson**: Model architectures can vary significantly between implementations
+
+### 8. Incremental Implementation
+- **Order**: Embeddings → Attention → Mamba → MoE
+- **Benefit**: Each stage builds on previous success
+- **Testing**: Validate each component fully before moving on
+- **Result**: Systematic progress with clear milestones

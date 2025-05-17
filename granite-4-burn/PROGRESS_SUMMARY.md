@@ -82,9 +82,13 @@
    - ✅ Tensor conversion from bfloat16 to f32
    - ✅ Embeddings and layer norm weight loading
    - ✅ Attention weight loading implementation
-   - ⚠️ Mamba weight loading (TODO)
-   - ⚠️ MoE weight loading (TODO)
-   - ✅ Basic weight loading tests
+   - ✅ Mamba weight loading with all parameters:
+     - in_proj and out_proj weights (transposed)
+     - conv1d weights and bias (3D tensor handling)
+     - State space parameters (A_log, D, dt_bias)
+     - Normalization layer weights
+   - ⚠️ MoE weight loading (structure differs from model)
+   - ✅ Comprehensive weight loading tests
 
 ## Test Infrastructure ✅
 - Dual backend testing:
@@ -97,9 +101,9 @@
 
 ### Immediate (Week 5-6)
 1. **Complete Weight Loading**
-   - Implement Mamba weight mapping and loading
-   - Implement MoE router and expert weight loading
-   - Full end-to-end weight loading test
+   - ✅ Implement Mamba weight mapping and loading
+   - [ ] Implement MoE router and expert weight loading (structure mismatch)
+   - [ ] Full end-to-end weight loading test with forward pass
 
 2. **Inference Implementation**
    - Text tokenization integration
@@ -135,6 +139,6 @@
 - Attention, Mamba, MoE Router, and Hybrid Block: ✅ Complete
 - MoE FFN implementation: ✅ Complete
 - Model assembly: ✅ Complete
-- Weight loading: 80% Complete (embeddings, attention done; Mamba/MoE TODO)
-- Only inference pipeline remaining
+- Weight loading: 90% Complete (embeddings, attention, Mamba done; MoE structure differs)
+- Only inference pipeline and MoE weight mapping remaining
 - Ahead of schedule for 8-week timeline
