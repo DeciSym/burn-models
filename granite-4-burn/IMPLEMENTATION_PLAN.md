@@ -12,7 +12,7 @@ We follow **Test-Driven Development (TDD)** principles:
 
 ## Progress
 
-### Phase 1: Core Components (Weeks 1-4) - 85% COMPLETE
+### Phase 1: Core Components (Weeks 1-4) - 90% COMPLETE
 #### Week 1 ✅ COMPLETED
 - ✅ **Attention Module** (`src/model/attention.rs`)
   - Implemented `GraniteMoeHybridAttention` with GQA support
@@ -89,15 +89,15 @@ We follow **Test-Driven Development (TDD)** principles:
   - [ ] Gradient checkpointing preparation
   - [ ] Expert weight memory mapping research
 
-### Phase 2: Model Assembly (Week 5) - REVISED
+### Phase 2: Model Assembly (Week 5) ✅ COMPLETED
 1. **Complete Model Implementation**
-   - [ ] Write tests for minimal model (4k context, 8 experts)
-   - [ ] Implement basic model structure with embeddings
-   - [ ] Stack all 40 hybrid blocks
-   - [ ] Test forward pass end-to-end
-   - [ ] Validate output shapes
-   - [ ] Add final layer normalization
-   - [ ] Implement output projection (lm_head)
+   - [x] Write tests for minimal model (4k context, 8 experts)
+   - [x] Implement basic model structure with embeddings
+   - [x] Stack all 40 hybrid blocks
+   - [x] Test forward pass end-to-end
+   - [x] Validate output shapes
+   - [x] Add final layer normalization
+   - [x] Implement output projection (lm_head)
 
 2. **Cache Implementation**
    - [ ] Write tests for hybrid cache (KV + state)
@@ -209,23 +209,22 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - Residual connections
   - Layer pattern generator [5M,1A,9M,1A,9M,1A,9M,1A,4M]
 
-## Next Steps: Model Assembly
+### 6. Complete Model (`src/model/model.rs`) ✅
+- `GraniteMoeHybrid` with:
+  - Token embeddings
+  - Stacks all 40 hybrid blocks
+  - Final layer normalization
+  - Output projection (lm_head)
+  - Forward pass implementation
+  - Configuration-based initialization
 
-### Main Model (`src/model/model.rs`)
-```rust
-pub struct GraniteMoeHybrid<B: Backend> {
-    embeddings: nn::Embedding<B>,
-    layers: Vec<GraniteMoeHybridBlock<B>>,
-    norm: GraniteMoeHybridRMSNorm<B>,
-    lm_head: nn::Linear<B>,
-}
-```
+## Next Steps: Weight Loading
 
-### Forward Pass Implementation
-- Token embedding
-- Pass through hybrid blocks
-- Final normalization
-- Output projection
+### Weight Conversion (`src/loader.rs`)
+- Load HuggingFace weights from Hub
+- Convert to Burn tensor format
+- Handle BF16 precision
+- Map parameter names correctly
 
 ## Technical Challenges & Solutions
 

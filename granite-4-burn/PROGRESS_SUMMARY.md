@@ -49,7 +49,7 @@
    - Tests from 8 experts scaled to 62
    - All tests passing on both backends
 
-### Week 3: Integration (IN PROGRESS)
+### Week 3: Integration ✅ COMPLETED
 6. **Hybrid Decoder Block** (`src/model/block.rs`)
    - Combines attention or mamba layers based on configuration
    - Layer normalization (RMSNorm) before each layer
@@ -63,6 +63,16 @@
    - Router integration with weighted expert outputs
    - Support for all 62 experts
    - Memory-efficient processing
+
+### Week 4: Model Assembly ✅ COMPLETED
+8. **Main Model Implementation** (`src/model/model.rs`)
+   - Complete model structure with embeddings
+   - Stacks all 40 hybrid blocks following correct pattern
+   - Final layer normalization
+   - Output projection (lm_head)
+   - Forward pass implementation
+   - Configuration-based initialization
+   - Scaled testing for efficiency
 
 ## Test Infrastructure ✅
 - Dual backend testing:
@@ -105,10 +115,11 @@
 3. **GPU Compatibility**: Ensured all operations work on AMD GPUs with ROCm
 4. **Backend-Agnostic Code**: Avoided type comparison issues with generic backend types
 
-## Current Status: 85% Complete
+## Current Status: 90% Complete
 
-- Phase 1 Core Components: Nearly complete
+- Phase 1 Core Components: Complete
 - Attention, Mamba, MoE Router, and Hybrid Block finished
 - MoE FFN implementation complete
-- Only model assembly and weight loading remaining
-- On track for 8-week timeline
+- Model assembly complete
+- Only weight loading and inference remaining
+- Ahead of schedule for 8-week timeline
