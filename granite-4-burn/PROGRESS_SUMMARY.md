@@ -39,6 +39,16 @@
    - SiLU activation and gating
    - Tests validated on both backends
 
+### Week 2.5: MoE Router
+5. **Mixture of Experts Router** (`src/model/moe.rs`)
+   - Complete router implementation
+   - Softmax-based expert selection
+   - Top-k (k=6) routing for 62 experts
+   - Load balancing auxiliary loss
+   - Expert weight normalization
+   - Tests from 8 experts scaled to 62
+   - All tests passing on both backends
+
 ## Test Infrastructure ✅
 - Dual backend testing:
   - CPU: ndarray backend (default)
@@ -47,15 +57,6 @@
 - All tests passing in both environments
 
 ## Next Steps 🚀
-
-### Week 2.5: MoE Router
-1. **Mixture of Experts Router** (`src/model/moe.rs`)
-   - Need to implement:
-     - Top-k (k=6) expert selection for 62 experts
-     - Load balancing logic
-     - Auxiliary loss computation
-     - Router network architecture
-   - TDD approach: Write tests before implementation
 
 ### Week 3: Integration
 1. **Hybrid Decoder Block** (`src/model/block.rs`)
@@ -87,8 +88,9 @@
 2. **Causal Convolution**: Proper padding implementation for time-series data
 3. **GPU Compatibility**: Ensured all operations work on AMD GPUs with ROCm
 
-## Current Status: 50% Complete
+## Current Status: 75% Complete
 
-- Phase 1 Core Components: 2/4 modules complete
-- Ready to begin MoE router implementation
+- Phase 1 Core Components: 3/4 modules complete
+- Attention, Mamba, and MoE Router finished
+- Expert FFN implementation remaining
 - On track for 8-week timeline
