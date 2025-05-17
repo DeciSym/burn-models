@@ -51,7 +51,6 @@ pub struct GraniteMoeHybridConfig {
 
     // The non-linear activation function (function or string) in the
     // decoder.
-    #[config(default = "silu")]
     pub hidden_act: String,
 
     // The maximum sequence length that this model might ever be used
@@ -65,7 +64,7 @@ pub struct GraniteMoeHybridConfig {
     pub initializer_range: f64,
 
     // The epsilon used by the rms normalization layers.
-    #[config(default = 1e-06)]
+    #[config(default = 0.000001)]
     pub rms_norm_eps: f64,
 
     // Whether or not the model should return the last key/values
@@ -173,7 +172,6 @@ pub struct GraniteMoeHybridConfig {
     pub mamba_d_state: usize,
 
     // Head embedding dimension size. Defaults to "auto"
-    #[config(default = MambaDHead::Auto)]
     pub mamba_d_head: MambaDHead,
 
     // The size of the mamba convolution kernel.
@@ -218,6 +216,52 @@ impl Default for MambaDHead {
 pub struct RopeScaling {
     pub scaling_type: String,
     pub factor: f32,
+}
+
+impl Default for GraniteMoeHybridConfig {
+    fn default() -> Self {
+        Self {
+            vocab_size: 32000,
+            hidden_size: 4096,
+            intermediate_size: 11008,
+            num_hidden_layers: 32,
+            num_attention_heads: 32,
+            num_key_value_heads: Some(8),
+            hidden_act: "silu".to_string(),
+            tie_word_embeddings: false,
+            initializer_range: 0.02,
+            rms_norm_eps: 1e-6,
+            use_cache: true,
+            pad_token_id: None,
+            bos_token_id: 1,
+            eos_token_id: 2,
+            rope_theta: 10000.0,
+            rope_scaling: None,
+            max_position_embeddings: 2048,
+            attention_bias: false,
+            attention_dropout: 0.0,
+            embedding_multiplier: 1.0,
+            logits_scaling: 1.0,
+            residual_multiplier: 1.0,
+            attention_multiplier: 1.0,
+            num_local_experts: 64,
+            num_experts_per_tok: 2,
+            output_router_logits: false,
+            router_aux_loss_coef: 0.001,
+            shared_intermediate_size: 1024,
+            position_embedding_type: None,
+            layer_types: None,
+            mamba_n_heads: 128,
+            mamba_n_groups: 1,
+            mamba_d_state: 256,
+            mamba_d_head: MambaDHead::Auto,
+            mamba_d_conv: 4,
+            mamba_expand: 2,
+            mamba_chunk_size: 256,
+            mamba_conv_bias: true,
+            mamba_proj_bias: false,
+        }
+    }
 }
 
 impl GraniteMoeHybridConfig {
