@@ -12,7 +12,7 @@ We follow **Test-Driven Development (TDD)** principles:
 
 ## Progress
 
-### Phase 1: Core Components (Weeks 1-4) - 50% COMPLETE
+### Phase 1: Core Components (Weeks 1-4) - 75% COMPLETE
 #### Week 1 ✅ COMPLETED
 - ✅ **Attention Module** (`src/model/attention.rs`)
   - Implemented `GraniteMoeHybridAttention` with GQA support
@@ -48,16 +48,16 @@ We follow **Test-Driven Development (TDD)** principles:
   - Full SSM computation with A, B, C, delta parameters
   - Tests passing on both CPU (ndarray) and GPU (tch-gpu on AMD MI210)
 
-#### Week 2.5: MoE Router
-- ⏳ **MoE Router** (`src/model/moe.rs`)
-  - [ ] Start with simplified 8 experts, 2 active for testing
-  - [ ] Write tests for expert routing
-  - [ ] Implement top-k selection logic
-  - [ ] Add load balancing tests
-  - [ ] Implement basic router without experts
-  - [ ] Test auxiliary loss computation
-  - [ ] Scale to 62 experts, 6 active after validation
-  - [ ] Add memory profiling for expert weights
+#### Week 2.5: MoE Router ✅ COMPLETED
+- ✅ **MoE Router** (`src/model/moe.rs`)
+  - [x] Start with simplified 8 experts, 2 active for testing
+  - [x] Write tests for expert routing
+  - [x] Implement top-k selection logic
+  - [x] Add load balancing tests
+  - [x] Implement basic router without experts
+  - [x] Test auxiliary loss computation
+  - [x] Scale to 62 experts, 6 active after validation
+  - [ ] Add memory profiling for expert weights (deferred to Phase 1.5)
 
 #### Week 3: Integration
 - ⏳ **Hybrid Block** (`src/model/block.rs`)
@@ -181,12 +181,12 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - Selective scan algorithm ✅
   - Gated MLP with SiLU activation ✅ (Note: Using SiLU instead of SwiGLU for mamba module)
 
-### 3. Mixture of Experts (`src/model/moe.rs`)
+### 3. Mixture of Experts (`src/model/moe.rs`) ✅ PARTIALLY COMPLETED
 - Implement `GraniteMoeHybridMoE` with:
-  - Router network for expert selection
-  - Top-k (k=2) expert routing
-  - 64 expert FFN blocks
-  - Load balancing auxiliary loss
+  - Router network for expert selection ✅
+  - Top-k (k=6) expert routing ✅
+  - 62 expert FFN blocks (router done, FFNs pending)
+  - Load balancing auxiliary loss ✅
 
 ### 4. Base Components (`src/model/components.rs`) ✅ COMPLETED
 - `GraniteMoeHybridRMSNorm`: RMS normalization ✅
