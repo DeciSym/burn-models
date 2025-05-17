@@ -63,7 +63,7 @@ We follow **Test-Driven Development (TDD)** principles:
 #### Week 3: Integration ✅ COMPLETED
 - ✅ **Hybrid Block** (`src/model/block.rs`)
   - [x] Write tests for attention-Mamba interaction
-  - [x] Implement actual layer pattern: [5M, 1A, 10M, 1A, 9M, 1A, 9M, 1A, 3M] (40 layers total)
+  - [x] Implement actual layer pattern: [5M, 1A, 9M, 1A, 9M, 1A, 9M, 1A, 4M] (40 layers total)
   - [x] Test residual connections
   - [x] Validate layer normalization
   - [x] Ensure correct layer type selection by index
@@ -207,7 +207,7 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - Layer normalization before each layer
   - MoE FFN integration
   - Residual connections
-  - Layer pattern generator [5M,1A,10M,1A,9M,1A,9M,1A,3M]
+  - Layer pattern generator [5M,1A,9M,1A,9M,1A,9M,1A,4M]
 
 ## Next Steps: Model Assembly
 
@@ -242,7 +242,7 @@ pub struct GraniteMoeHybrid<B: Backend> {
 ### 3. Hybrid Architecture ✅ COMPLETED
 - **Challenge**: Variable attention-to-Mamba pattern (4 attention among 40 layers)
 - **Solution**: Layer pattern generator with configurable blocks
-- **Result**: Correct layer pattern [5M,1A,10M,1A,9M,1A,9M,1A,3M]
+- **Result**: Correct layer pattern [5M,1A,9M,1A,9M,1A,9M,1A,4M]
 
 ### 4. Backend-Agnostic Code ✅ COMPLETED
 - **Challenge**: Type comparisons with generic backends
@@ -314,7 +314,7 @@ safetensors = "0.4"  # Weight format
 - Mamba head dimension: 64
 - Context window: 131,072 tokens (128k)
 - Intermediate size: 512
-- Layer pattern: 5M, 1A, 10M, 1A, 9M, 1A, 9M, 1A, 3M
+- Layer pattern: 5M, 1A, 9M, 1A, 9M, 1A, 9M, 1A, 4M
 
 ## References
 - HuggingFace Model: https://huggingface.co/ibm-granite/granite-4.0-tiny-preview

@@ -54,7 +54,7 @@
    - Combines attention or mamba layers based on configuration
    - Layer normalization (RMSNorm) before each layer
    - MoE FFN integration with residual connections
-   - Layer pattern generator for 40 layers: [5M,1A,10M,1A,9M,1A,9M,1A,3M]
+   - Layer pattern generator for 40 layers: [5M,1A,9M,1A,9M,1A,9M,1A,4M]
    - Tests validating all functionality
    
 7. **MoE Feed-Forward Network** (`src/model/moe.rs`)
