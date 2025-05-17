@@ -50,18 +50,22 @@ We follow **Test-Driven Development (TDD)** principles:
 
 #### Week 2.5: MoE Router
 - ⏳ **MoE Router** (`src/model/moe.rs`)
+  - [ ] Start with simplified 8 experts, 2 active for testing
   - [ ] Write tests for expert routing
   - [ ] Implement top-k selection logic
   - [ ] Add load balancing tests
   - [ ] Implement basic router without experts
   - [ ] Test auxiliary loss computation
+  - [ ] Scale to 62 experts, 6 active after validation
+  - [ ] Add memory profiling for expert weights
 
 #### Week 3: Integration
 - ⏳ **Hybrid Block** (`src/model/block.rs`)
   - [ ] Write tests for attention-Mamba interaction
-  - [ ] Implement 1:9 attention-to-Mamba pattern
+  - [ ] Implement actual layer pattern: [5M, 1A, 10M, 1A, 9M, 1A, 9M, 1A, 4M]
   - [ ] Test residual connections
   - [ ] Validate layer normalization
+  - [ ] Ensure correct layer type selection by index
   
 - ⏳ **Complete MoE** (`src/model/moe.rs`)
   - [ ] Write tests for full MoE with expert FFNs
@@ -76,6 +80,13 @@ We follow **Test-Driven Development (TDD)** principles:
   - [ ] Implement kernel fusion for MoE operations
   - [ ] Memory pooling for large contexts
   - [ ] Profile and optimize bottlenecks
+  
+- ⏳ **Memory Management**
+  - [ ] Implement basic KV cache system
+  - [ ] Add Mamba state cache
+  - [ ] Memory profiling tools
+  - [ ] Gradient checkpointing preparation
+  - [ ] Expert weight memory mapping research
 
 ### Phase 2: Model Assembly (Week 5) - REVISED
 1. **Simplified Model First**
@@ -263,14 +274,32 @@ pub fn granite_4_0_tiny_preview<B: Backend>(
 - API documentation
 - Usage examples
 
+## Lessons Learned (From Completed Work)
+
+### 1. Tensor Operations
+- Burn's `unsqueeze` adds dimensions at position 0, not the end
+- Use `reshape` for explicit dimension control
+- Always test tensor shapes before algorithms
+
+### 2. Development Strategy
+- TDD catches dimension issues early
+- Start with naive implementations, optimize later
+- Clean module interfaces enable easier testing
+
+### 3. Architecture Insights
+- Layer pattern is complex: [5M,1A,10M,1A,9M,1A,9M,1A,4M]
+- Hybrid models need careful state management
+- Memory will be critical with 131k context + 62 experts
+
 ## Technical Challenges & Solutions
 
-### 1. Mamba Implementation
+### 1. Mamba Implementation ✅ COMPLETED
 - **Challenge**: Selective scan algorithm efficiency
 - **Solution**: 
-  * Start with basic implementation, optimize later
-  * Use TDD to ensure correctness before optimization
-  * GPU-specific optimizations in Phase 1.5
+  * Started with basic implementation, optimization deferred
+  * Used TDD to ensure correctness before optimization
+  * GPU-specific optimizations planned for Phase 1.5
+- **Result**: Working implementation on both backends
 
 ### 2. MoE Routing
 - **Challenge**: Load balancing across 62 experts with 6 active per token
