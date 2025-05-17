@@ -2,47 +2,150 @@
 
 This document outlines the plan to port the IBM Granite 4.0 Tiny Preview LLM from HuggingFace to Burn 0.17.0.
 
+## Development Methodology
+
+We follow **Test-Driven Development (TDD)** principles:
+1. Write tests first before implementing functionality
+2. Implement minimal code to make tests pass
+3. Refactor for clarity and performance
+4. Ensure all tests pass on both CPU (ndarray) and GPU (tch-gpu) backends
+
 ## Progress
 
-### Phase 1: Core Components ✅ (IN PROGRESS)
-- ✅ **Attention Module** (`src/model/attention.rs`) - Completed
+### Phase 1: Core Components (Weeks 1-4) - IN PROGRESS
+#### Week 1 ✅ COMPLETED
+- ✅ **Attention Module** (`src/model/attention.rs`)
   - Implemented `GraniteMoeHybridAttention` with GQA support
   - No positional encoding (NoPE) support
   - RMSNorm layer normalization (optional)
   - KV-cache support
   - Tests passing on both CPU (ndarray) and GPU (tch-gpu on AMD MI210)
   
-- ✅ **Base Components** (`src/model/components.rs`) - Completed
+- ✅ **Base Components** (`src/model/components.rs`)
   - `GraniteMoeHybridRMSNorm`: RMS normalization
   - SwiGLU activation function
   - Tests passing on both backends
 
-- ✅ **Configuration** (`src/model/config.rs`) - Completed
+- ✅ **Configuration** (`src/model/config.rs`)
   - Full configuration structure with all required parameters
   - Default implementation
   - Validation logic
   - Tests passing
 
-- ⏳ **Mamba State Space Module** (`src/model/mamba.rs`) - Pending
-- ⏳ **Mixture of Experts** (`src/model/moe.rs`) - Pending
+#### Week 2: Mamba Implementation
+- ⏳ **Simple Mamba Module** (`src/model/mamba.rs`) - IN PROGRESS
+  - [x] Write tests for SSM forward pass
+  - [x] Implement basic state space model structure
+  - [x] Add convolution layer
+  - [ ] Implement selective scan algorithm (basic version)
+  - [x] Ensure tests pass on both backends
+  
+  **Status**: Basic Mamba module implemented with input/output projections, 1D causal convolution, and simple gating. Full SSM computation (A, B, C, D matrices) still pending.
 
-### Phase 2-5: Not Started
+#### Week 2.5: MoE Router
+- ⏳ **MoE Router** (`src/model/moe.rs`)
+  - [ ] Write tests for expert routing
+  - [ ] Implement top-k selection logic
+  - [ ] Add load balancing tests
+  - [ ] Implement basic router without experts
+  - [ ] Test auxiliary loss computation
 
-## Testing Infrastructure
-- Set up dual backend testing:
+#### Week 3: Integration
+- ⏳ **Hybrid Block** (`src/model/block.rs`)
+  - [ ] Write tests for attention-Mamba interaction
+  - [ ] Implement 1:9 attention-to-Mamba pattern
+  - [ ] Test residual connections
+  - [ ] Validate layer normalization
+  
+- ⏳ **Complete MoE** (`src/model/moe.rs`)
+  - [ ] Write tests for full MoE with expert FFNs
+  - [ ] Implement all 62 expert networks
+  - [ ] Test gradient flow through experts
+  - [ ] Validate memory efficiency
+
+### Phase 1.5: Performance Optimization (Week 4) - NEW
+- ⏳ **Optimizations**
+  - [ ] Write performance benchmarks
+  - [ ] Optimize Mamba selective scan for GPU
+  - [ ] Implement kernel fusion for MoE operations
+  - [ ] Memory pooling for large contexts
+  - [ ] Profile and optimize bottlenecks
+
+### Phase 2: Model Assembly (Week 5) - REVISED
+1. **Simplified Model First**
+   - [ ] Write tests for minimal model (4k context, 8 experts)
+   - [ ] Implement basic model structure
+   - [ ] Test forward pass end-to-end
+   - [ ] Validate output shapes
+
+2. **Cache Implementation**
+   - [ ] Write tests for hybrid cache (KV + state)
+   - [ ] Implement efficient cache management
+   - [ ] Test cache behavior across layers
+
+### Phase 3: Full Model & Weight Loading (Week 6) - REVISED
+1. **Scale to Full Specifications**
+   - [ ] Write tests for full model (131k context, 62 experts)
+   - [ ] Implement complete model
+   - [ ] Memory optimization for long contexts
+
+2. **Weight Loading**
+   - [ ] Write tests for weight conversion
+   - [ ] Implement HuggingFace weight loader
+   - [ ] Handle BF16 precision conversion
+   - [ ] Validate loaded weights
+
+### Phase 4: Inference & Generation (Week 7)
+- **Text Generation**
+  - [ ] Write tests for sampling strategies
+  - [ ] Implement temperature sampling
+  - [ ] Add top-k/top-p filtering
+  - [ ] Test repetition penalty
+  
+- **Example Applications**
+  - [ ] Simple text completion
+  - [ ] Interactive chat interface
+  - [ ] Long-context processing demo
+
+### Phase 5: Validation & Documentation (Week 8)
+- **Validation Suite**
+  - [ ] Write comparison tests with HuggingFace outputs
+  - [ ] Implement gradient checking
+  - [ ] Validate numerical stability
+  - [ ] Performance benchmarking
+
+- **Documentation**
+  - [ ] API documentation
+  - [ ] Architecture overview
+  - [ ] Usage examples
+  - [ ] Performance analysis
+
+## Testing Infrastructure ✅ COMPLETED
+- Dual backend testing configured:
   - CPU: ndarray backend (default)
   - GPU: tch-gpu backend on AMD Instinct MI210 with ROCm 6.4
 - Tests run successfully on Ubuntu 24.04.2 LTS
 - Environment configured with PyTorch libtorch for ROCm support
+- TDD approach enforced: tests written before implementation
 
 ## Overview
 
 The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
 - Attention blocks with Grouped Query Attention (GQA)
 - Mamba state space model blocks
-- Mixture of Experts (MoE) with 64 experts
-- 7B total parameters with 1B active
-- 128k token context window
+- Mixture of Experts (MoE) with 62 experts
+- 688M total parameters with 209M active
+- 131k token context window
+- Hybrid layer pattern: 40 layers total (4 attention + 36 mamba)
+
+## Timeline Summary (Revised)
+- **Phase 1**: Core Components (Weeks 1-4) - Extended from 1-2 weeks
+- **Phase 1.5**: Performance Optimization (Week 4) - New phase
+- **Phase 2**: Model Assembly (Week 5) - Now with simplified model first
+- **Phase 3**: Full Model & Weight Loading (Week 6)
+- **Phase 4**: Inference & Generation (Week 7)
+- **Phase 5**: Validation & Documentation (Week 8) - New phase
+- **Total**: 8 weeks (up from original 6 weeks)
 
 ## Phase 1: Core Components (Week 1-2)
 
@@ -157,19 +260,38 @@ pub fn granite_4_0_tiny_preview<B: Backend>(
 
 ### 1. Mamba Implementation
 - **Challenge**: Selective scan algorithm efficiency
-- **Solution**: Use Burn's tensor operations with careful memory management
+- **Solution**: 
+  * Start with basic implementation, optimize later
+  * Use TDD to ensure correctness before optimization
+  * GPU-specific optimizations in Phase 1.5
 
 ### 2. MoE Routing
-- **Challenge**: Load balancing across experts
-- **Solution**: Implement auxiliary loss for balanced routing
+- **Challenge**: Load balancing across 62 experts with 6 active per token
+- **Solution**: 
+  * Implement router separately from experts
+  * Test with smaller expert count first (8 experts)
+  * Scale to full 62 experts after validation
 
-### 3. Long Context Support
-- **Challenge**: 128k token context window
-- **Solution**: Efficient cache management and memory pooling
+### 3. Hybrid Architecture
+- **Challenge**: Variable attention-to-Mamba pattern (4 attention among 40 layers)
+- **Solution**:
+  * Test each component independently first
+  * Create integration tests for block interactions
+  * Careful cache management for both types
 
-### 4. Mixed Precision
-- **Challenge**: BF16 computation
-- **Solution**: Use Burn's precision features with fallback to F32
+### 4. Long Context Support
+- **Challenge**: 131k token context window
+- **Solution**: 
+  * Start with 4k context in simplified model
+  * Implement memory pooling strategies
+  * Scale up gradually with performance testing
+
+### 5. Mixed Precision
+- **Challenge**: BF16 computation and memory efficiency
+- **Solution**: 
+  * Use Burn's precision features with F32 fallback
+  * Test numerical stability at each phase
+  * Profile memory usage continuously
 
 ## Directory Structure
 ```
@@ -223,16 +345,19 @@ safetensors = "0.4"  # Weight format
 ```
 
 ## Key Model Parameters
-- Vocabulary size: 32,000
-- Hidden size: 4,096
-- Number of layers: 28
-- Number of attention heads: 48
-- Number of key-value heads: 12
-- Number of experts: 64
-- Active experts per token: 2
-- Mamba heads: 128
-- Mamba state dimension: 256
-- Context window: 128k tokens
+- Vocabulary size: 49,160
+- Hidden size: 1,536
+- Number of layers: 40 (4 attention + 36 mamba)
+- Number of attention heads: 12
+- Number of key-value heads: 4
+- Number of experts: 62
+- Active experts per token: 6
+- Mamba heads: 48
+- Mamba state dimension: 128
+- Mamba head dimension: 64
+- Context window: 131,072 tokens (128k)
+- Intermediate size: 512
+- Layer pattern: [5 mamba, 1 attention] → [10 mamba, 1 attention] → [9 mamba, 1 attention] → [9 mamba, 1 attention] → [4 mamba]
 
 ## References
 - HuggingFace Model: https://huggingface.co/ibm-granite/granite-4.0-tiny-preview
