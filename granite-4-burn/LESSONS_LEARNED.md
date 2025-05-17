@@ -148,24 +148,47 @@ Updated: 2025-01-17
 
 ### 5. Modular Field Access
 - **Problem**: Private fields prevented weight loading access
-- **Solution**: Made necessary fields public for loader access
+- **Solution**: Made necessary fields public or added accessor methods
 - **Trade-off**: Slightly less encapsulation for practical loading needs
-- **Alternative**: Could use builder pattern or friend modules
+- **Alternative**: Used accessor methods for FFN enum variants
 
 ### 6. State Space Parameters
 - **Discovery**: Mamba has additional parameters (A_log, D, dt_bias, norm)
 - **Integration**: Added these to the Mamba module structure
 - **Initialization**: Need proper initial values (e.g., A_log starts at -5.0)
 - **Testing**: Verify parameter shapes match HuggingFace expectations
+- **Fix**: Resolved dimension mismatch (6448 vs expected 6144) through testing
 
-### 7. Layer Type Mapping
-- **HuggingFace**: Uses "mamba" and "attention" as primary layer types
-- **FFN Types**: Additionally has "shared_mlp" vs "block_sparse_moe" 
-- **Our Model**: Simpler unified structure
-- **Lesson**: Model architectures can vary significantly between implementations
+### 7. FFN Architecture Discovery
+- **Initial Assumption**: All layers use the same MoE FFN structure
+- **Reality**: HuggingFace uses mixed architectures (SharedMLP and BlockSparseMoE)
+- **Solution**: Created FFN enum to handle both types dynamically
+- **Pattern**: Different layers have different FFN types based on configuration
+- **Lesson**: Always validate architectural assumptions against reference implementation
 
-### 8. Incremental Implementation
-- **Order**: Embeddings → Attention → Mamba → MoE
+### 8. 3D Weight Tensor Handling
+- **Discovery**: MoE shared projections stored as [num_experts, dim1, dim2]
+- **Challenge**: Need to extract individual expert weights from 3D tensors
+- **Temporary Solution**: Using first expert weights as placeholder
+- **TODO**: Implement proper expert weight extraction
+- **Lesson**: Weight storage format can be complex for large models
+
+### 9. Router Weight Path
+- **Issue**: Router weights include "layer" in the path
+- **Expected**: "router.weight"
+- **Actual**: "router.layer.weight"
+- **Solution**: Updated weight pattern matching to include "layer"
+- **Lesson**: Always examine actual weight names in the files
+
+### 10. Incremental Implementation
+- **Order**: Embeddings → Attention → Mamba → FFN Architecture → Expert Weights
 - **Benefit**: Each stage builds on previous success
 - **Testing**: Validate each component fully before moving on
 - **Result**: Systematic progress with clear milestones
+
+### 11. Test-Driven Discoveries
+- **FFN Types**: Tests revealed mixed SharedMLP/BlockSparseMoE architecture
+- **Missing Parameters**: Tests found missing Mamba parameters
+- **Dimension Issues**: Tests caught 3D tensor handling requirements
+- **Weight Paths**: Tests exposed router.layer.weight pattern
+- **Lesson**: TDD not only ensures correctness but reveals requirements

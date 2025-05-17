@@ -40,6 +40,8 @@ We follow **Test-Driven Development (TDD)** principles:
   - [x] Add convolution layer
   - [x] Implement selective scan algorithm (basic version)
   - [x] Ensure tests pass on both backends
+  - [x] Add all missing Mamba parameters (A_log, D, dt_bias, norm)
+  - [x] Complete Mamba weight loading with dimension fixes
   
   **Status**: Complete Mamba module implemented with:
   - Input/output projections
@@ -47,6 +49,7 @@ We follow **Test-Driven Development (TDD)** principles:
   - Selective scan algorithm with state space computation
   - SiLU activation and gating mechanisms
   - Full SSM computation with A, B, C, delta parameters
+  - All parameters now loaded from HuggingFace (A_log, D, dt_bias, norm)
   - Tests passing on both CPU (ndarray) and GPU (tch-gpu on AMD MI210)
 
 #### Week 2.5: MoE Router ✅ COMPLETED
@@ -73,6 +76,15 @@ We follow **Test-Driven Development (TDD)** principles:
   - [x] Implement all 62 expert networks
   - [x] Test gradient flow through experts
   - [x] Validate memory efficiency
+
+#### Week 4: FFN Architecture Resolution ✅ COMPLETED
+- ✅ **FFN Architecture Discovery**
+  - [x] Discovered HuggingFace uses mixed FFN types (SharedMLP and BlockSparseMoE)
+  - [x] Created SharedMLP module for standard FFN layers
+  - [x] Created BlockSparseMoE module for mixture of experts layers
+  - [x] Implemented FFN enum to support both types dynamically
+  - [x] Updated loader to handle 3D weight tensors
+  - [x] Successfully loaded all FFN weights from HuggingFace
 
 ### Phase 1.5: Performance Optimization (Week 4) - NEW
 - ⏳ **Optimizations**
@@ -110,14 +122,17 @@ We follow **Test-Driven Development (TDD)** principles:
    - [ ] Implement complete model
    - [ ] Memory optimization for long contexts
 
-2. **Weight Loading** ✅ PARTIALLY COMPLETE
+2. **Weight Loading** ✅ MOSTLY COMPLETE
    - [x] Write tests for weight conversion
    - [x] Implement HuggingFace weight loader with safetensors
    - [x] Handle BF16 precision conversion
    - [x] Implement embeddings weight loading
    - [x] Implement attention weight loading  
    - [x] Implement Mamba weight loading with all parameters
-   - [ ] Implement MoE weight loading (structure differs)
+   - [x] Implement FFN weight loading (SharedMLP and BlockSparseMoE)
+   - [x] Handle 3D tensor weights for MoE shared projections
+   - [ ] Implement proper expert weight extraction (currently using placeholder)
+   - [ ] Add per-layer FFN type configuration
    - [ ] Validate loaded weights with forward pass
 
 ### Phase 4: Inference & Generation (Week 7)
