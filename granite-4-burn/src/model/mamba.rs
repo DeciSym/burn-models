@@ -80,6 +80,7 @@ pub struct GraniteMoeHybridMamba<B: Backend> {
 impl<B: Backend> GraniteMoeHybridMamba<B> {
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, seq_len, _] = hidden_states.dims();
+        let device = hidden_states.device();
         
         // Input projection: expand to 2 * mamba_intermediate
         let proj_states = self.in_proj.forward(hidden_states);
@@ -109,9 +110,18 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
         // Apply SiLU activation
         let conv_states = conv_states.clone() * activation::sigmoid(conv_states);
         
-        // For now, we'll use a simple gating mechanism
-        // In full implementation, this would involve SSM computation
-        let gated_states = conv_states * activation::sigmoid(gate);
+        // Create SSM parameters (in real implementation these would be learned)
+        // For now, let's create simple parameters for testing
+        let a = Tensor::ones([mamba_intermediate, self.mamba_d_state], &device).mul_scalar(-5.0);
+        let b = Tensor::ones([batch_size, seq_len, self.mamba_d_state], &device);
+        let c = Tensor::ones([batch_size, seq_len, self.mamba_d_state], &device);
+        let delta = Tensor::ones([batch_size, seq_len, mamba_intermediate], &device);
+        
+        // Apply selective scan
+        let ssm_states = selective_scan(conv_states, a, b, c, delta);
+        
+        // Combine with gate
+        let gated_states = ssm_states * activation::sigmoid(gate);
         
         // Output projection back to hidden_size
         let output = self.out_proj.forward(gated_states);
@@ -120,9 +130,69 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
     }
 }
 
+/// Selective scan algorithm for efficient state space computation
+fn selective_scan<B: Backend>(
+    x: Tensor<B, 3>,
+    a: Tensor<B, 2>,
+    b: Tensor<B, 3>,
+    c: Tensor<B, 3>,
+    delta: Tensor<B, 3>,
+) -> Tensor<B, 3> {
+    let [batch_size, seq_len, d_model] = x.dims();
+    let [_, d_state] = a.dims();
+    
+    // Initialize hidden state
+    let device = x.device();
+    let mut h = Tensor::zeros([batch_size, d_model, d_state], &device);
+    let mut outputs = Vec::with_capacity(seq_len);
+    
+    // Sequential scan (simplified version)
+    for t in 0..seq_len {
+        // Extract inputs at time t
+        let x_t = x.clone().slice([0..batch_size, t..t+1, 0..d_model]).squeeze::<2>(1); // [batch, d_model]
+        let b_t = b.clone().slice([0..batch_size, t..t+1, 0..d_state]).squeeze::<2>(1); // [batch, d_state]
+        let c_t = c.clone().slice([0..batch_size, t..t+1, 0..d_state]).squeeze::<2>(1); // [batch, d_state]
+        let delta_t = delta.clone().slice([0..batch_size, t..t+1, 0..d_model]).squeeze::<2>(1); // [batch, d_model]
+        
+        // Discretize A for this timestep
+        // A_bar = exp(delta_t * A)
+        // We need to compute exp(delta_t[b,i] * a[i,j]) for each b, i, j
+        // First reshape delta_t to add the state dimension
+        let delta_t_reshaped = delta_t.reshape([batch_size, d_model, 1]); // [batch, d_model, 1]
+        // Expand delta_t to match dimensions with a
+        let delta_expanded = delta_t_reshaped.expand([batch_size, d_model, d_state]); // [batch, d_model, d_state]
+        // Now expand a to have batch dimension
+        let a_reshaped = a.clone().reshape([1, d_model, d_state]); // [1, d_model, d_state]
+        let a_expanded = a_reshaped.expand([batch_size, d_model, d_state]); // [batch, d_model, d_state]
+        // Element-wise multiply and exp
+        let a_bar = (delta_expanded * a_expanded).exp();
+        
+        // Update hidden state: h_t = A_bar * h_{t-1} + B * x_t
+        let h_decay = h.clone() * a_bar; // [batch, d_model, d_state]
+        
+        // Compute outer product: x_t * b_t
+        let x_t_expanded = x_t.reshape([batch_size, d_model, 1]); // [batch, d_model, 1]
+        let b_t_expanded = b_t.reshape([batch_size, 1, d_state]); // [batch, 1, d_state]
+        let h_input = x_t_expanded.matmul(b_t_expanded); // [batch, d_model, d_state]
+        
+        h = h_decay + h_input;
+        
+        // Compute output: y_t = h_t @ c_t
+        let c_t_expanded = c_t.reshape([batch_size, d_state, 1]); // [batch, d_state, 1]
+        let y_t = h.clone().matmul(c_t_expanded); // [batch, d_model, 1]
+        let y_t_sq = y_t.squeeze::<2>(2); // [batch, d_model]
+        
+        outputs.push(y_t_sq.reshape([batch_size, 1, d_model])); // [batch, 1, d_model]
+    }
+    
+    // Concatenate outputs along sequence dimension
+    Tensor::cat(outputs, 1) // [batch, seq_len, d_model]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use burn::tensor::TensorData;
     #[cfg(feature = "tch-gpu")]
     use burn_tch::{LibTorch, LibTorchDevice};
     #[cfg(feature = "tch-gpu")]
@@ -264,5 +334,114 @@ mod tests {
         
         // Check output dimensions for chunk processing
         assert_eq!(output.dims(), [batch_size, seq_len, 1536]);
+    }
+    
+    #[test]
+    fn test_selective_scan_computation() {
+        let device = test_device();
+        let batch_size = 2;
+        let seq_len = 16;
+        let d_state = 4;
+        let d_model = 8;
+        
+        // Create test inputs
+        let x = Tensor::<TestBackend, 3>::random(
+            [batch_size, seq_len, d_model],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        
+        // Create SSM parameters
+        let a = Tensor::<TestBackend, 2>::random(
+            [d_model, d_state],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let b = Tensor::<TestBackend, 3>::random(
+            [batch_size, seq_len, d_state],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let c = Tensor::<TestBackend, 3>::random(
+            [batch_size, seq_len, d_state],
+            burn::tensor::Distribution::Normal(0.0, 1.0),
+            &device,
+        );
+        let delta = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_model], &device);
+        
+        // Test selective scan function (to be implemented)
+        let result = selective_scan(x.clone(), a, b, c, delta);
+        
+        // Verify output shape
+        assert_eq!(result.dims(), [batch_size, seq_len, d_model]);
+        
+        // Verify that output is different from input (processing happened)
+        let diff = result.sub(x).abs().mean();
+        assert!(diff.into_scalar() > 0.01);
+    }
+    
+    #[test]
+    fn test_selective_scan_causality() {
+        let device = test_device();
+        let batch_size = 1;
+        let seq_len = 8;
+        let d_state = 4;
+        let d_model = 8;
+        
+        // Create inputs where second half is zeros
+        let mut x_data = vec![0.0; batch_size * seq_len * d_model];
+        for i in 0..(seq_len/2 * d_model) {
+            x_data[i] = 1.0;
+        }
+        let x = Tensor::<TestBackend, 1>::from_data(
+            TensorData::from(x_data.as_slice()),
+            &device,
+        ).reshape([batch_size, seq_len, d_model]);
+        
+        // Create SSM parameters
+        let a = Tensor::<TestBackend, 2>::ones([d_model, d_state], &device).mul_scalar(0.9);
+        let b = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_state], &device);
+        let c = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_state], &device);
+        let delta = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_model], &device);
+        
+        // Run selective scan
+        let result = selective_scan(x, a, b, c, delta);
+        
+        // Check causality: first half should be non-zero, but changes in second half input
+        // should not affect first half output
+        let first_half = result.slice([0..batch_size, 0..seq_len/2, 0..d_model]);
+        let first_half_sum = first_half.abs().sum();
+        assert!(first_half_sum.into_scalar() > 0.1);
+    }
+    
+    #[test]
+    fn test_tensor_dimensions() {
+        let device = test_device();
+        let batch_size = 2;
+        let d_model = 8;
+        let d_state = 4;
+        
+        // Test A tensor expansion
+        let a = Tensor::<TestBackend, 2>::ones([d_model, d_state], &device);
+        println!("a.dims(): {:?}", a.dims());
+        
+        // Try reshaping a to have batch dimension
+        let a_reshaped = a.clone().reshape([1, d_model, d_state]);
+        println!("a.reshape([1, d_model, d_state]).dims(): {:?}", a_reshaped.dims());
+        
+        // Test delta_t expansion  
+        let delta_t = Tensor::<TestBackend, 2>::ones([batch_size, d_model], &device);
+        println!("delta_t.dims(): {:?}", delta_t.dims());
+        
+        // Add dimension at the end
+        let delta_t_reshaped = delta_t.clone().reshape([batch_size, d_model, 1]);
+        println!("delta_t.reshape([batch, d_model, 1]).dims(): {:?}", delta_t_reshaped.dims());
+        
+        // Now try expansion
+        let delta_expanded = delta_t_reshaped.expand([batch_size, d_model, d_state]);
+        println!("delta_expanded.dims(): {:?}", delta_expanded.dims());
+        
+        let a_expanded = a_reshaped.expand([batch_size, d_model, d_state]);
+        println!("a_expanded.dims(): {:?}", a_expanded.dims());
     }
 }

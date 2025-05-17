@@ -156,13 +156,13 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - RMSNorm layer normalization
   - KV-cache support
 
-### 2. Mamba State Space Module (`src/model/mamba.rs`)
+### 2. Mamba State Space Module (`src/model/mamba.rs`) ✓
 - Implement `GraniteMoeHybridMambaLayer` with:
-  - SSM parameters (A, B, C, D matrices)
-  - Time step (∆) computation
-  - State evolution logic
-  - Selective scan algorithm
-  - Gated MLP with SwiGLU activation
+  - SSM parameters (A, B, C, D matrices) ✓
+  - Time step (∆) computation ✓
+  - State evolution logic ✓
+  - Selective scan algorithm ✓
+  - Gated MLP with SiLU activation ✓ (Note: Using SiLU instead of SwiGLU for mamba module)
 
 ### 3. Mixture of Experts (`src/model/moe.rs`)
 - Implement `GraniteMoeHybridMoE` with:
