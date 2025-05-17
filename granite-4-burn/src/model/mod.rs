@@ -3,6 +3,9 @@ pub mod components;
 pub mod config;
 pub mod mamba;
 pub mod moe;
+pub mod shared_mlp;
+pub mod block_sparse_moe;
+pub mod ffn;
 pub mod block;
 pub mod model;
 
@@ -11,5 +14,8 @@ pub use components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig, swi
 pub use config::GraniteMoeHybridConfig;
 pub use mamba::{GraniteMoeHybridMamba, GraniteMoeHybridMambaConfig};
 pub use moe::{GraniteMoeHybridRouter, GraniteMoeHybridRouterConfig, GraniteMoeHybridFFN, GraniteMoeHybridFFNConfig};
+pub use shared_mlp::{SharedMLP, SharedMLPConfig};
+pub use block_sparse_moe::{BlockSparseMoE, BlockSparseMoEConfig};
+pub use ffn::FFN;
 pub use block::{GraniteMoeHybridBlock, GraniteMoeHybridBlockConfig};
 pub use model::GraniteMoeHybrid;

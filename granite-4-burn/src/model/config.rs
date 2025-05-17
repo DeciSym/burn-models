@@ -158,6 +158,9 @@ pub struct GraniteMoeHybridConfig {
 
     // Allowed choices: "mamba", "attention".
     pub layer_types: Option<Vec<String>>,
+    
+    // FFN types for each layer. HuggingFace can have "shared_mlp" or "block_sparse_moe"
+    pub layers_ffn_type: Option<Vec<String>>,
 
     // The number of mamba heads used.
     #[config(default = 128)]
@@ -251,6 +254,7 @@ impl Default for GraniteMoeHybridConfig {
             shared_intermediate_size: 1024,
             position_embedding_type: None,
             layer_types: None,
+            layers_ffn_type: None,
             mamba_n_heads: 128,
             mamba_n_groups: 1,
             mamba_d_state: 256,

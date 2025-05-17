@@ -10,7 +10,10 @@ use super::{
     config::GraniteMoeHybridConfig,
     attention::GraniteMoeHybridAttentionConfig,
     mamba::GraniteMoeHybridMambaConfig,
-    moe::{GraniteMoeHybridFFNConfig, GraniteMoeHybridRouterConfig},
+    ffn::FFNConfig,
+    block_sparse_moe::BlockSparseMoEConfig,
+    shared_mlp::SharedMLPConfig,
+    moe::GraniteMoeHybridRouterConfig,
 };
 
 #[derive(Module, Debug)]
@@ -57,24 +60,59 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         }
     }
     
-    fn create_block_config(config: &GraniteMoeHybridConfig, layer_type: &str, _layer_idx: usize) -> GraniteMoeHybridBlockConfig {
-        // Create MoE FFN config (same for all layers)
-        let router_config = GraniteMoeHybridRouterConfig {
-            hidden_size: config.hidden_size,
-            num_experts: config.num_local_experts,
-            num_selected_experts: config.num_experts_per_tok,
-            router_type: "softmax".to_string(),
-            router_aux_loss_coef: config.router_aux_loss_coef as f32,
-        };
-        
-        let moe_ffn_config = GraniteMoeHybridFFNConfig {
-            hidden_size: config.hidden_size,
-            intermediate_size: config.intermediate_size,
-            num_experts: config.num_local_experts,
-            num_experts_per_tok: config.num_experts_per_tok,
-            hidden_act: config.hidden_act.clone(),
-            mlp_bias: false,
-            router_config,
+    fn create_block_config(config: &GraniteMoeHybridConfig, layer_type: &str, layer_idx: usize) -> GraniteMoeHybridBlockConfig {
+        // Create FFN config based on the layer type from HuggingFace config
+        let ffn_config = if let Some(ffn_types) = &config.layers_ffn_type {
+            // Use the FFN type from the config if available
+            match ffn_types[layer_idx].as_str() {
+                "shared_mlp" => {
+                    FFNConfig::SharedMLP(SharedMLPConfig {
+                        hidden_size: config.hidden_size,
+                        intermediate_size: config.intermediate_size,
+                        hidden_act: config.hidden_act.clone(),
+                        mlp_bias: false,
+                    })
+                },
+                "block_sparse_moe" => {
+                    let router_config = GraniteMoeHybridRouterConfig {
+                        hidden_size: config.hidden_size,
+                        num_experts: config.num_local_experts,
+                        num_selected_experts: config.num_experts_per_tok,
+                        router_type: "softmax".to_string(),
+                        router_aux_loss_coef: config.router_aux_loss_coef as f32,
+                    };
+                    FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
+                        hidden_size: config.hidden_size,
+                        expert_intermediate_size: config.intermediate_size,
+                        shared_intermediate_size: config.intermediate_size,
+                        num_experts: config.num_local_experts,
+                        num_experts_per_tok: config.num_experts_per_tok,
+                        hidden_act: config.hidden_act.clone(),
+                        mlp_bias: false,
+                        router_config,
+                    })
+                },
+                _ => panic!("Unknown FFN type: {}", ffn_types[layer_idx]),
+            }
+        } else {
+            // Default to BlockSparseMoE if no FFN types are specified
+            let router_config = GraniteMoeHybridRouterConfig {
+                hidden_size: config.hidden_size,
+                num_experts: config.num_local_experts,
+                num_selected_experts: config.num_experts_per_tok,
+                router_type: "softmax".to_string(),
+                router_aux_loss_coef: config.router_aux_loss_coef as f32,
+            };
+            FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
+                hidden_size: config.hidden_size,
+                expert_intermediate_size: config.intermediate_size,
+                shared_intermediate_size: config.intermediate_size,
+                num_experts: config.num_local_experts,
+                num_experts_per_tok: config.num_experts_per_tok,
+                hidden_act: config.hidden_act.clone(),
+                mlp_bias: false,
+                router_config,
+            })
         };
         
         // Create layer-specific config
@@ -119,7 +157,7 @@ impl<B: Backend> GraniteMoeHybrid<B> {
             attention_config,
             mamba_config,
             layer_norm_eps: config.rms_norm_eps as f32,
-            moe_ffn_config,
+            ffn_config,
         }
     }
 

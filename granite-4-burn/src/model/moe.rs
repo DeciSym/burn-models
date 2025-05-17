@@ -45,6 +45,11 @@ impl<B: Backend> GraniteMoeHybridRouter<B> {
         }
     }
     
+    /// Provides mutable access to the router linear layer for weight loading
+    pub fn router_mut(&mut self) -> &mut Linear<B> {
+        &mut self.router
+    }
+    
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> RouterOutput<B> {
         let [batch_size, seq_len, hidden_size] = hidden_states.dims();
         let _device = hidden_states.device();

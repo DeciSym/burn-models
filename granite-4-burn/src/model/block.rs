@@ -8,7 +8,9 @@ use super::{
     attention::{GraniteMoeHybridAttention, GraniteMoeHybridAttentionConfig},
     components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig},
     mamba::{GraniteMoeHybridMamba, GraniteMoeHybridMambaConfig},
-    moe::{GraniteMoeHybridFFN, GraniteMoeHybridFFNConfig},
+    ffn::{FFN, FFNConfig},
+    block_sparse_moe::BlockSparseMoEConfig,
+    moe::GraniteMoeHybridRouterConfig,
 };
 
 #[derive(Config)]
@@ -25,8 +27,8 @@ pub struct GraniteMoeHybridBlockConfig {
     // Layer normalization config
     pub layer_norm_eps: f32,
     
-    // MoE FFN config
-    pub moe_ffn_config: GraniteMoeHybridFFNConfig,
+    // FFN config (either SharedMLP or BlockSparseMoE)
+    pub ffn_config: FFNConfig,
 }
 
 impl GraniteMoeHybridBlockConfig {
@@ -54,8 +56,8 @@ impl GraniteMoeHybridBlockConfig {
             eps: self.layer_norm_eps,
         }.init(device);
         
-        // Initialize MoE FFN
-        let moe_ffn = self.moe_ffn_config.init(device);
+        // Initialize FFN (either SharedMLP or BlockSparseMoE)
+        let ffn = self.ffn_config.init(device);
         
         // Initialize FFN normalization (before FFN)
         let post_attention_layernorm = GraniteMoeHybridRMSNormConfig {
@@ -66,7 +68,7 @@ impl GraniteMoeHybridBlockConfig {
         GraniteMoeHybridBlock {
             layer,
             input_layernorm,
-            moe_ffn,
+            ffn,
             post_attention_layernorm,
             self_attn,
             mamba,
@@ -84,7 +86,7 @@ pub enum BlockLayer<B: Backend> {
 pub struct GraniteMoeHybridBlock<B: Backend> {
     pub layer: BlockLayer<B>,
     pub input_layernorm: GraniteMoeHybridRMSNorm<B>,
-    pub moe_ffn: GraniteMoeHybridFFN<B>,
+    pub ffn: FFN<B>,
     pub post_attention_layernorm: GraniteMoeHybridRMSNorm<B>,
     pub self_attn: Option<GraniteMoeHybridAttention<B>>,
     pub mamba: Option<GraniteMoeHybridMamba<B>>,
@@ -113,8 +115,8 @@ impl<B: Backend> GraniteMoeHybridBlock<B> {
         // 4. Apply FFN normalization
         let ffn_normalized = self.post_attention_layernorm.forward(hidden_states.clone());
         
-        // 5. Apply MoE FFN
-        let ffn_output = self.moe_ffn.forward(ffn_normalized);
+        // 5. Apply FFN (either SharedMLP or BlockSparseMoE)
+        let ffn_output = self.ffn.forward(ffn_normalized);
         
         // 6. Add residual connection for FFN
         hidden_states + ffn_output
@@ -177,7 +179,7 @@ mod tests {
         }
     }
     
-    fn create_test_moe_ffn_config(hidden_size: usize) -> GraniteMoeHybridFFNConfig {
+    fn create_test_ffn_config(hidden_size: usize) -> FFNConfig {
         let router_config = GraniteMoeHybridRouterConfig {
             hidden_size,
             num_experts: 4,
@@ -186,15 +188,16 @@ mod tests {
             router_aux_loss_coef: 0.01,
         };
         
-        GraniteMoeHybridFFNConfig {
+        FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
             hidden_size,
-            intermediate_size: 2048,
+            expert_intermediate_size: 2048,
+            shared_intermediate_size: 2048,
             num_experts: 4,
             num_experts_per_tok: 2,
             hidden_act: "silu".to_string(),
             mlp_bias: false,
             router_config,
-        }
+        })
     }
     
     #[test]
@@ -204,8 +207,8 @@ mod tests {
         let batch_size = 2;
         let seq_len = 10;
         
-        // Create MoE FFN config (required for all blocks)
-        let moe_ffn_config = create_test_moe_ffn_config(hidden_size);
+        // Create FFN config (required for all blocks)
+        let ffn_config = create_test_ffn_config(hidden_size);
         
         // Create attention config
         let attention_config = GraniteMoeHybridAttentionConfig {
@@ -223,7 +226,7 @@ mod tests {
             attention_config: Some(attention_config),
             mamba_config: None,
             layer_norm_eps: 1e-6,
-            moe_ffn_config,
+            ffn_config,
         };
         
         let block = block_config.init::<TestBackend>(&device);
@@ -252,8 +255,8 @@ mod tests {
         let batch_size = 2;
         let seq_len = 10;
         
-        // Create MoE FFN config
-        let moe_ffn_config = create_test_moe_ffn_config(hidden_size);
+        // Create FFN config
+        let ffn_config = create_test_ffn_config(hidden_size);
         
         // Create mamba config
         let mamba_config = GraniteMoeHybridMambaConfig {
@@ -274,7 +277,7 @@ mod tests {
             attention_config: None,
             mamba_config: Some(mamba_config),
             layer_norm_eps: 1e-6,
-            moe_ffn_config,
+            ffn_config,
         };
         
         let block = block_config.init::<TestBackend>(&device);
@@ -332,8 +335,8 @@ mod tests {
         let batch_size = 2;
         let seq_len = 10;
         
-        // Create MoE FFN config
-        let moe_ffn_config = create_test_moe_ffn_config(hidden_size);
+        // Create FFN config
+        let ffn_config = create_test_ffn_config(hidden_size);
         
         // Create a mamba block
         let mamba_config = GraniteMoeHybridMambaConfig {
@@ -354,7 +357,7 @@ mod tests {
             attention_config: None,
             mamba_config: Some(mamba_config),
             layer_norm_eps: 1e-6,
-            moe_ffn_config,
+            ffn_config,
         };
         
         let block = block_config.init::<TestBackend>(&device);
@@ -393,8 +396,8 @@ mod tests {
         let batch_size = 2;
         let seq_len = 10;
         
-        // Create MoE FFN config
-        let moe_ffn_config = create_test_moe_ffn_config(hidden_size);
+        // Create FFN config
+        let ffn_config = create_test_ffn_config(hidden_size);
         
         // Create attention config
         let attention_config = GraniteMoeHybridAttentionConfig {
@@ -412,7 +415,7 @@ mod tests {
             attention_config: Some(attention_config),
             mamba_config: None,
             layer_norm_eps: 1e-6,
-            moe_ffn_config,
+            ffn_config,
         };
         
         let block = block_config.init::<TestBackend>(&device);
