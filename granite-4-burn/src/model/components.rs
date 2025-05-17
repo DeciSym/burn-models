@@ -24,8 +24,8 @@ impl GraniteMoeHybridRMSNormConfig {
 
 #[derive(Module, Debug)]
 pub struct GraniteMoeHybridRMSNorm<B: Backend> {
-    weight: Tensor<B, 1>,
-    eps: f32,
+    pub weight: Tensor<B, 1>,
+    pub eps: f32,
 }
 
 impl<B: Backend> GraniteMoeHybridRMSNorm<B> {

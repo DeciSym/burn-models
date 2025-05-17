@@ -32,22 +32,24 @@ pub struct GraniteMoeHybridBlockConfig {
 impl GraniteMoeHybridBlockConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> GraniteMoeHybridBlock<B> {
         // Initialize layer based on type
-        let layer = match self.layer_type.as_str() {
+        let (layer, self_attn, mamba) = match self.layer_type.as_str() {
             "attention" => {
                 let attention_config = self.attention_config.as_ref()
                     .expect("attention_config must be provided for attention layers");
-                BlockLayer::Attention(attention_config.init(device))
+                let attention = attention_config.init(device);
+                (BlockLayer::Attention(attention.clone()), Some(attention), None)
             },
             "mamba" => {
                 let mamba_config = self.mamba_config.as_ref()
                     .expect("mamba_config must be provided for mamba layers");
-                BlockLayer::Mamba(mamba_config.init(device))
+                let mamba = mamba_config.init(device);
+                (BlockLayer::Mamba(mamba.clone()), None, Some(mamba))
             },
             _ => panic!("layer_type must be either 'attention' or 'mamba'"),
         };
         
         // Initialize layer normalization (before attention/mamba)
-        let layer_norm = GraniteMoeHybridRMSNormConfig {
+        let input_layernorm = GraniteMoeHybridRMSNormConfig {
             dim: self.hidden_size,
             eps: self.layer_norm_eps,
         }.init(device);
@@ -56,16 +58,18 @@ impl GraniteMoeHybridBlockConfig {
         let moe_ffn = self.moe_ffn_config.init(device);
         
         // Initialize FFN normalization (before FFN)
-        let ffn_norm = GraniteMoeHybridRMSNormConfig {
+        let post_attention_layernorm = GraniteMoeHybridRMSNormConfig {
             dim: self.hidden_size,
             eps: self.layer_norm_eps,
         }.init(device);
         
         GraniteMoeHybridBlock {
             layer,
-            layer_norm,
+            input_layernorm,
             moe_ffn,
-            ffn_norm,
+            post_attention_layernorm,
+            self_attn,
+            mamba,
         }
     }
 }
@@ -78,16 +82,18 @@ pub enum BlockLayer<B: Backend> {
 
 #[derive(Module, Debug)]
 pub struct GraniteMoeHybridBlock<B: Backend> {
-    layer: BlockLayer<B>,
-    layer_norm: GraniteMoeHybridRMSNorm<B>,
-    moe_ffn: GraniteMoeHybridFFN<B>,
-    ffn_norm: GraniteMoeHybridRMSNorm<B>,
+    pub layer: BlockLayer<B>,
+    pub input_layernorm: GraniteMoeHybridRMSNorm<B>,
+    pub moe_ffn: GraniteMoeHybridFFN<B>,
+    pub post_attention_layernorm: GraniteMoeHybridRMSNorm<B>,
+    pub self_attn: Option<GraniteMoeHybridAttention<B>>,
+    pub mamba: Option<GraniteMoeHybridMamba<B>>,
 }
 
 impl<B: Backend> GraniteMoeHybridBlock<B> {
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
         // 1. Apply layer normalization
-        let normalized = self.layer_norm.forward(hidden_states.clone());
+        let normalized = self.input_layernorm.forward(hidden_states.clone());
         
         // 2. Apply the layer (attention or mamba)
         let layer_output = match &self.layer {
@@ -105,7 +111,7 @@ impl<B: Backend> GraniteMoeHybridBlock<B> {
         let hidden_states = hidden_states + layer_output;
         
         // 4. Apply FFN normalization
-        let ffn_normalized = self.ffn_norm.forward(hidden_states.clone());
+        let ffn_normalized = self.post_attention_layernorm.forward(hidden_states.clone());
         
         // 5. Apply MoE FFN
         let ffn_output = self.moe_ffn.forward(ffn_normalized);

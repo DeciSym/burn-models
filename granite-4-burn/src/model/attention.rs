@@ -31,7 +31,7 @@ impl GraniteMoeHybridAttentionConfig {
         let v_proj = LinearConfig::new(self.hidden_size, self.num_key_value_heads * self.head_dim)
             .with_bias(false)
             .init(device);
-        let o_proj = LinearConfig::new(self.num_attention_heads * self.head_dim, self.hidden_size)
+        let output = LinearConfig::new(self.num_attention_heads * self.head_dim, self.hidden_size)
             .with_bias(false)
             .init(device);
 
@@ -45,10 +45,10 @@ impl GraniteMoeHybridAttentionConfig {
         };
 
         GraniteMoeHybridAttention {
-            q_proj,
-            k_proj,
-            v_proj,
-            o_proj,
+            query: q_proj,
+            key: k_proj,
+            value: v_proj,
+            output,
             residual_norm,
             num_attention_heads: self.num_attention_heads,
             num_key_value_heads: self.num_key_value_heads,
@@ -61,16 +61,16 @@ impl GraniteMoeHybridAttentionConfig {
 
 #[derive(Module, Debug)]
 pub struct GraniteMoeHybridAttention<B: Backend> {
-    q_proj: Linear<B>,
-    k_proj: Linear<B>,
-    v_proj: Linear<B>,
-    o_proj: Linear<B>,
-    residual_norm: Option<GraniteMoeHybridRMSNorm<B>>,
-    num_attention_heads: usize,
-    num_key_value_heads: usize,
-    head_dim: usize,
-    attention_dropout: f64,
-    residual_attention_norm: bool,
+    pub query: Linear<B>,
+    pub key: Linear<B>,
+    pub value: Linear<B>,
+    pub output: Linear<B>,
+    pub residual_norm: Option<GraniteMoeHybridRMSNorm<B>>,
+    pub num_attention_heads: usize,
+    pub num_key_value_heads: usize,
+    pub head_dim: usize,
+    pub attention_dropout: f64,
+    pub residual_attention_norm: bool,
 }
 
 impl<B: Backend> GraniteMoeHybridAttention<B> {
@@ -83,9 +83,9 @@ impl<B: Backend> GraniteMoeHybridAttention<B> {
         let [batch_size, seq_len, _] = hidden_states.dims();
         
         // Project input to query, key, and value
-        let query_states = self.q_proj.forward(hidden_states.clone());
-        let key_states = self.k_proj.forward(hidden_states.clone());
-        let value_states = self.v_proj.forward(hidden_states);
+        let query_states = self.query.forward(hidden_states.clone());
+        let key_states = self.key.forward(hidden_states.clone());
+        let value_states = self.value.forward(hidden_states);
         
         // Reshape to [batch, seq_len, num_heads, head_dim]
         let query_states = query_states.reshape([
@@ -133,7 +133,7 @@ impl<B: Backend> GraniteMoeHybridAttention<B> {
         ]);
         
         // Apply output projection
-        let attn_output = self.o_proj.forward(attn_output);
+        let attn_output = self.output.forward(attn_output);
         
         // Apply residual normalization if enabled
         let attn_output = if let Some(norm) = &self.residual_norm {

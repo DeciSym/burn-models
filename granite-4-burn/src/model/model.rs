@@ -5,7 +5,7 @@ use burn::{
 };
 
 use super::{
-    block::{GraniteMoeHybridBlock, GraniteMoeHybridBlockConfig, get_layer_pattern},
+    block::{GraniteMoeHybridBlock, GraniteMoeHybridBlockConfig},
     components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig},
     config::GraniteMoeHybridConfig,
     attention::GraniteMoeHybridAttentionConfig,
@@ -142,11 +142,29 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         
         logits
     }
+    
+    // Getters for accessing model components during weight loading
+    pub fn embeddings_mut(&mut self) -> &mut Embedding<B> {
+        &mut self.embeddings
+    }
+    
+    pub fn layers_mut(&mut self) -> &mut Vec<GraniteMoeHybridBlock<B>> {
+        &mut self.layers
+    }
+    
+    pub fn norm_mut(&mut self) -> &mut GraniteMoeHybridRMSNorm<B> {
+        &mut self.norm
+    }
+    
+    pub fn lm_head_mut(&mut self) -> &mut Linear<B> {
+        &mut self.lm_head
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::block::get_layer_pattern;
     #[cfg(feature = "tch-gpu")]
     use burn_tch::{LibTorch, LibTorchDevice};
     #[cfg(feature = "tch-gpu")]

@@ -74,6 +74,18 @@
    - Configuration-based initialization
    - Scaled testing for efficiency
 
+### Week 5: Weight Loading (IN PROGRESS)
+9. **Weight Loader Implementation** (`src/loader.rs`)
+   - ✅ Safetensors file loading
+   - ✅ Configuration loading from HuggingFace
+   - ✅ Weight file indexing and mapping
+   - ✅ Tensor conversion from bfloat16 to f32
+   - ✅ Embeddings and layer norm weight loading
+   - ✅ Attention weight loading implementation
+   - ⚠️ Mamba weight loading (TODO)
+   - ⚠️ MoE weight loading (TODO)
+   - ✅ Basic weight loading tests
+
 ## Test Infrastructure ✅
 - Dual backend testing:
   - CPU: ndarray backend (default)
@@ -83,17 +95,17 @@
 
 ## Next Steps 🚀
 
-### Week 3-4: Model Assembly
-1. **Complete Model Implementation** (`src/model/model.rs`)
-   - Stack all 40 hybrid blocks
-   - Word embeddings
-   - Final output layer
-   - Gradient flow validation
+### Immediate (Week 5-6)
+1. **Complete Weight Loading**
+   - Implement Mamba weight mapping and loading
+   - Implement MoE router and expert weight loading
+   - Full end-to-end weight loading test
 
-2. **Weight Loading**
-   - HuggingFace checkpoint conversion
-   - Parameter mapping
-   - Validation tests
+2. **Inference Implementation**
+   - Text tokenization integration
+   - Generation pipeline
+   - Sampling strategies (greedy, top-k, top-p)
+   - Example usage code
 
 ### Phase 1.5: Performance Optimization
 - GPU-optimized selective scan
@@ -107,6 +119,7 @@
 3. **TDD Success**: Every component has comprehensive tests written before implementation
 4. **Architecture Clarity**: Clean separation of concerns with modular design
 5. **Hybrid Architecture**: Successful integration of attention, mamba, and MoE components
+6. **Weight Loading**: Successfully loading and converting bfloat16 weights to Burn tensors
 
 ## Challenges Overcome 💪
 
@@ -114,12 +127,14 @@
 2. **Causal Convolution**: Proper padding implementation for time-series data
 3. **GPU Compatibility**: Ensured all operations work on AMD GPUs with ROCm
 4. **Backend-Agnostic Code**: Avoided type comparison issues with generic backend types
+5. **Bfloat16 Conversion**: Properly handling HuggingFace's bfloat16 format in safetensors
 
-## Current Status: 90% Complete
+## Current Status: 95% Complete
 
-- Phase 1 Core Components: Complete
-- Attention, Mamba, MoE Router, and Hybrid Block finished
-- MoE FFN implementation complete
-- Model assembly complete
-- Only weight loading and inference remaining
+- Phase 1 Core Components: ✅ Complete
+- Attention, Mamba, MoE Router, and Hybrid Block: ✅ Complete
+- MoE FFN implementation: ✅ Complete
+- Model assembly: ✅ Complete
+- Weight loading: 80% Complete (embeddings, attention done; Mamba/MoE TODO)
+- Only inference pipeline remaining
 - Ahead of schedule for 8-week timeline
