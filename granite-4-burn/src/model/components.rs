@@ -63,6 +63,12 @@ pub fn silu<B: Backend>(x: Tensor<B, 3>) -> Tensor<B, 3> {
     x.mul(sigmoid_x)
 }
 
+pub fn silu_2d<B: Backend>(x: Tensor<B, 2>) -> Tensor<B, 2> {
+    // SiLU (Swish) activation: x * sigmoid(x) for 2D tensors
+    let sigmoid_x = activation::sigmoid(x.clone());
+    x.mul(sigmoid_x)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,6 +6,8 @@ use burn::{
     tensor::activation,
 };
 
+use super::components::{silu_2d};
+
 #[derive(Config)]
 pub struct GraniteMoeHybridRouterConfig {
     pub hidden_size: usize,
@@ -290,5 +292,231 @@ mod tests {
         let min_index = output.expert_indices.clone().min();
         assert!(max_index.into_scalar() < 62);
         assert!(min_index.into_scalar() >= 0);
+    }
+}
+
+// MoE FFN Config and Implementation
+#[derive(Config)]
+pub struct GraniteMoeHybridFFNConfig {
+    pub hidden_size: usize,
+    pub intermediate_size: usize,
+    pub num_experts: usize,
+    pub num_experts_per_tok: usize,
+    pub hidden_act: String,
+    pub mlp_bias: bool,
+    pub router_config: GraniteMoeHybridRouterConfig,
+}
+
+impl GraniteMoeHybridFFNConfig {
+    pub fn init<B: Backend>(&self, device: &B::Device) -> GraniteMoeHybridFFN<B> {
+        GraniteMoeHybridFFN::new(self, device)
+    }
+}
+
+#[derive(Module, Debug)]
+pub struct GraniteMoeHybridFFN<B: Backend> {
+    router: GraniteMoeHybridRouter<B>,
+    experts: Vec<Expert<B>>,
+    num_experts_per_tok: usize,
+}
+
+#[derive(Module, Debug)]
+pub struct Expert<B: Backend> {
+    gate_proj: Linear<B>,
+    up_proj: Linear<B>,  
+    down_proj: Linear<B>,
+    intermediate_size: usize,
+    hidden_act: String,
+}
+
+impl<B: Backend> Expert<B> {
+    pub fn new(config: &GraniteMoeHybridFFNConfig, device: &B::Device) -> Self {
+        let gate_proj = LinearConfig::new(config.hidden_size, config.intermediate_size)
+            .with_bias(config.mlp_bias)
+            .init(device);
+        let up_proj = LinearConfig::new(config.hidden_size, config.intermediate_size)
+            .with_bias(config.mlp_bias)
+            .init(device);
+        let down_proj = LinearConfig::new(config.intermediate_size, config.hidden_size)
+            .with_bias(config.mlp_bias)
+            .init(device);
+            
+        Self {
+            gate_proj,
+            up_proj,
+            down_proj,
+            intermediate_size: config.intermediate_size,
+            hidden_act: config.hidden_act.clone(),
+        }
+    }
+    
+    pub fn forward(&self, hidden_states: Tensor<B, 2>) -> Tensor<B, 2> {
+        let gate_output = self.gate_proj.forward(hidden_states.clone());
+        let up_output = self.up_proj.forward(hidden_states);
+        
+        // Apply activation to gate output and multiply with up output
+        let activated = match self.hidden_act.as_str() {
+            "silu" => silu_2d(gate_output),
+            "relu" => activation::relu(gate_output),
+            "gelu" => activation::gelu(gate_output),
+            _ => panic!("Unknown activation function: {}", self.hidden_act),
+        };
+        
+        let intermediate = activated * up_output;
+        
+        // Project back down
+        self.down_proj.forward(intermediate)
+    }
+}
+
+impl<B: Backend> GraniteMoeHybridFFN<B> {
+    pub fn new(config: &GraniteMoeHybridFFNConfig, device: &B::Device) -> Self {
+        let router = config.router_config.init(device);
+        
+        let mut experts = Vec::new();
+        for _ in 0..config.num_experts {
+            experts.push(Expert::new(config, device));
+        }
+        
+        Self {
+            router,
+            experts,
+            num_experts_per_tok: config.num_experts_per_tok,
+        }
+    }
+    
+    pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
+        let [batch_size, seq_len, hidden_size] = hidden_states.dims();
+        let _device = hidden_states.device();
+        
+        // Get routing decisions
+        let router_output = self.router.forward(hidden_states.clone());
+        
+        // Flatten batch and sequence dimensions
+        let hidden_states_flat = hidden_states.reshape([batch_size * seq_len, hidden_size]);
+        
+        // Initialize output tensor
+        let mut output = Tensor::zeros_like(&hidden_states_flat);
+        
+        // Process each expert
+        for expert_idx in 0..self.experts.len() {
+            // Create a mask for tokens that route to this expert
+            let expert_mask = router_output.expert_indices
+                .clone()
+                .equal_elem(expert_idx as i64); // [batch*seq_len, num_selected_experts]
+            
+            // Get the weight mask for this expert
+            let weight_mask = router_output.expert_weights.clone() * expert_mask.clone().float();
+            let expert_weights = weight_mask.sum_dim(1); // Sum across selected experts dim
+            
+            // Always process all tokens through the expert
+            // Inactive tokens will have zero weight and won't contribute to output
+            let all_tokens_output = self.experts[expert_idx].forward(hidden_states_flat.clone());
+            
+            // Weight the output (inactive tokens will have zero weight)
+            let weighted_output = all_tokens_output * expert_weights.clone().unsqueeze();
+            
+            // Accumulate
+            output = output + weighted_output;
+        }
+        
+        // Reshape back to original shape
+        output.reshape([batch_size, seq_len, hidden_size])
+    }
+}
+
+#[cfg(test)]
+mod ffn_tests {
+    use super::*;
+    use burn::tensor::Distribution;
+    
+    #[cfg(feature = "tch-gpu")]
+    type TestBackend = Autodiff<LibTorch>;
+    #[cfg(not(feature = "tch-gpu"))]
+    type TestBackend = burn::backend::NdArray;
+    #[cfg(feature = "tch-gpu")]
+    type TestDevice = LibTorchDevice;
+    #[cfg(not(feature = "tch-gpu"))]
+    type TestDevice = burn::backend::ndarray::NdArrayDevice;
+    
+    fn test_device() -> TestDevice {
+        #[cfg(feature = "tch-gpu")]
+        {
+            LibTorchDevice::Cuda(0)
+        }
+        #[cfg(not(feature = "tch-gpu"))]
+        {
+            burn::backend::ndarray::NdArrayDevice::default()
+        }
+    }
+    
+    #[test]
+    fn test_expert_forward() {
+        let device = test_device();
+        let hidden_size = 512;
+        let batch_size = 2;
+        
+        let config = GraniteMoeHybridFFNConfig {
+            hidden_size,
+            intermediate_size: 2048,
+            num_experts: 4,
+            num_experts_per_tok: 2,
+            hidden_act: "silu".to_string(),
+            mlp_bias: false,
+            router_config: GraniteMoeHybridRouterConfig {
+                hidden_size,
+                num_experts: 4,
+                num_selected_experts: 2,
+                router_type: "softmax".to_string(),
+                router_aux_loss_coef: 0.01,
+            },
+        };
+        
+        let expert = Expert::<TestBackend>::new(&config, &device);
+        let input = Tensor::<TestBackend, 2>::random(
+            [batch_size, hidden_size],
+            Distribution::Normal(0.0, 0.02),
+            &device,
+        );
+        
+        let output = expert.forward(input);
+        assert_eq!(output.dims(), [batch_size, hidden_size]);
+    }
+    
+    #[test]
+    fn test_moe_ffn_output_shape() {
+        let device = test_device();
+        let hidden_size = 512;
+        let batch_size = 2;
+        let seq_len = 10;
+        
+        let router_config = GraniteMoeHybridRouterConfig {
+            hidden_size,
+            num_experts: 4,
+            num_selected_experts: 2,
+            router_type: "softmax".to_string(),
+            router_aux_loss_coef: 0.01,
+        };
+        
+        let config = GraniteMoeHybridFFNConfig {
+            hidden_size,
+            intermediate_size: 2048,
+            num_experts: 4,
+            num_experts_per_tok: 2,
+            hidden_act: "silu".to_string(),
+            mlp_bias: false,
+            router_config,
+        };
+        
+        let moe_ffn = config.init::<TestBackend>(&device);
+        
+        let input = Tensor::<TestBackend, 3>::random(
+            [batch_size, seq_len, hidden_size],
+            Distribution::Normal(0.0, 0.02),
+            &device,
+        );
+        
+        let output = moe_ffn.forward(input);
+        assert_eq!(output.dims(), [batch_size, seq_len, hidden_size]);
     }
 }

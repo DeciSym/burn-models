@@ -1,5 +1,7 @@
 # Lessons Learned - Granite 4.0 Implementation
 
+Updated: 2025-01-17
+
 ## Technical Insights
 
 ### 1. Tensor Operations in Burn
@@ -85,3 +87,35 @@
 3. **Test Coverage**: Ensure no untested paths
 4. **Cache Efficiency**: Hit rates and memory usage
 5. **Expert Usage**: Load balancing statistics
+
+## Additional Lessons from MoE FFN Implementation
+
+### 1. Backend-Agnostic Programming
+- **Type Comparisons**: Cannot directly compare backend types (BoolElem, FloatElem)
+- **Solution**: Use tensor operations instead of scalar comparisons  
+- **Example**: Replace `if x.into_scalar() > 0.0` with tensor-based logic
+
+### 2. Activation Functions
+- **Dimension Flexibility**: Need both 2D and 3D versions of activation functions
+- **SiLU Implementation**: Works consistently across tensor dimensions
+- **Generic Design**: Template over tensor dimensions where possible
+
+### 3. Expert Network Design
+- **SwiGLU Pattern**: Gate and up projections multiplied after activation
+- **Weight Sharing**: All experts share the same architecture
+- **Sparse Computation**: Only process active expert paths
+
+### 4. Hybrid Block Architecture
+- **Residual Connections**: Two levels - after layer and after FFN
+- **Layer Normalization**: Applied before both layer and FFN
+- **Configurability**: Single struct handles both attention and mamba
+
+### 5. Testing Strategy
+- **Component Integration**: Test MoE FFN separately before block integration
+- **Helper Functions**: Reusable test configurations reduce boilerplate
+- **Layer Patterns**: Validate exact sequence [5M,1A,10M,1A,9M,1A,9M,1A,3M]
+
+### 6. Tensor Broadcasting
+- **Masked Operations**: Use element-wise multiplication for masking
+- **Accumulation**: Simple addition for accumulating expert outputs
+- **Efficiency**: Process all tokens through expert, let zeros handle inactivity

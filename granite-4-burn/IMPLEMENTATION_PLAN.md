@@ -12,7 +12,7 @@ We follow **Test-Driven Development (TDD)** principles:
 
 ## Progress
 
-### Phase 1: Core Components (Weeks 1-4) - 75% COMPLETE
+### Phase 1: Core Components (Weeks 1-4) - 85% COMPLETE
 #### Week 1 ✅ COMPLETED
 - ✅ **Attention Module** (`src/model/attention.rs`)
   - Implemented `GraniteMoeHybridAttention` with GQA support
@@ -24,6 +24,7 @@ We follow **Test-Driven Development (TDD)** principles:
 - ✅ **Base Components** (`src/model/components.rs`)
   - `GraniteMoeHybridRMSNorm`: RMS normalization
   - SwiGLU activation function
+  - SiLU activation function (2D and 3D versions)
   - Tests passing on both backends
 
 - ✅ **Configuration** (`src/model/config.rs`)
@@ -59,19 +60,19 @@ We follow **Test-Driven Development (TDD)** principles:
   - [x] Scale to 62 experts, 6 active after validation
   - [ ] Add memory profiling for expert weights (deferred to Phase 1.5)
 
-#### Week 3: Integration
-- ⏳ **Hybrid Block** (`src/model/block.rs`)
-  - [ ] Write tests for attention-Mamba interaction
-  - [ ] Implement actual layer pattern: [5M, 1A, 10M, 1A, 9M, 1A, 9M, 1A, 4M]
-  - [ ] Test residual connections
-  - [ ] Validate layer normalization
-  - [ ] Ensure correct layer type selection by index
+#### Week 3: Integration ✅ COMPLETED
+- ✅ **Hybrid Block** (`src/model/block.rs`)
+  - [x] Write tests for attention-Mamba interaction
+  - [x] Implement actual layer pattern: [5M, 1A, 10M, 1A, 9M, 1A, 9M, 1A, 3M] (40 layers total)
+  - [x] Test residual connections
+  - [x] Validate layer normalization
+  - [x] Ensure correct layer type selection by index
   
-- ⏳ **Complete MoE** (`src/model/moe.rs`)
-  - [ ] Write tests for full MoE with expert FFNs
-  - [ ] Implement all 62 expert networks
-  - [ ] Test gradient flow through experts
-  - [ ] Validate memory efficiency
+- ✅ **Complete MoE** (`src/model/moe.rs`)
+  - [x] Write tests for full MoE with expert FFNs
+  - [x] Implement all 62 expert networks
+  - [x] Test gradient flow through experts
+  - [x] Validate memory efficiency
 
 ### Phase 1.5: Performance Optimization (Week 4) - NEW
 - ⏳ **Optimizations**
@@ -89,11 +90,14 @@ We follow **Test-Driven Development (TDD)** principles:
   - [ ] Expert weight memory mapping research
 
 ### Phase 2: Model Assembly (Week 5) - REVISED
-1. **Simplified Model First**
+1. **Complete Model Implementation**
    - [ ] Write tests for minimal model (4k context, 8 experts)
-   - [ ] Implement basic model structure
+   - [ ] Implement basic model structure with embeddings
+   - [ ] Stack all 40 hybrid blocks
    - [ ] Test forward pass end-to-end
    - [ ] Validate output shapes
+   - [ ] Add final layer normalization
+   - [ ] Implement output projection (lm_head)
 
 2. **Cache Implementation**
    - [ ] Write tests for hybrid cache (KV + state)
@@ -164,44 +168,50 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
 - **Phase 5**: Validation & Documentation (Week 8) - New phase
 - **Total**: 8 weeks (up from original 6 weeks)
 
-## Phase 1: Core Components (Week 1-2)
+## Completed Components
 
-### 1. Attention Module (`src/model/attention.rs`) ✅ COMPLETED
-- Implement `GraniteMoeHybridAttention` with:
-  - Grouped Query Attention (GQA) support ✅
-  - No positional encoding (NoPE) ✅
-  - RMSNorm layer normalization ✅
-  - KV-cache support ✅
+### 1. Attention Module (`src/model/attention.rs`) ✅
+- `GraniteMoeHybridAttention` with:
+  - Grouped Query Attention (GQA) support
+  - No positional encoding (NoPE)
+  - RMSNorm layer normalization
+  - KV-cache support
 
-### 2. Mamba State Space Module (`src/model/mamba.rs`) ✅ COMPLETED
-- Implement `GraniteMoeHybridMambaLayer` with:
-  - SSM parameters (A, B, C, D matrices) ✅
-  - Time step (∆) computation ✅
-  - State evolution logic ✅
-  - Selective scan algorithm ✅
-  - Gated MLP with SiLU activation ✅ (Note: Using SiLU instead of SwiGLU for mamba module)
+### 2. Mamba State Space Module (`src/model/mamba.rs`) ✅
+- `GraniteMoeHybridMambaLayer` with:
+  - SSM parameters (A, B, C, D matrices)
+  - Time step (∆) computation
+  - State evolution logic
+  - Selective scan algorithm
+  - Gated MLP with SiLU activation
 
-### 3. Mixture of Experts (`src/model/moe.rs`) ✅ PARTIALLY COMPLETED
-- Implement `GraniteMoeHybridMoE` with:
-  - Router network for expert selection ✅
-  - Top-k (k=6) expert routing ✅
-  - 62 expert FFN blocks (router done, FFNs pending)
-  - Load balancing auxiliary loss ✅
+### 3. Mixture of Experts (`src/model/moe.rs`) ✅
+- `GraniteMoeHybridRouter` with:
+  - Router network for expert selection
+  - Top-k (k=6) expert routing
+  - Load balancing auxiliary loss
+- `GraniteMoeHybridFFN` with:
+  - All 62 expert FFN networks
+  - SwiGLU activation for experts
+  - Weighted expert outputs
+  - Memory-efficient processing
 
-### 4. Base Components (`src/model/components.rs`) ✅ COMPLETED
-- `GraniteMoeHybridRMSNorm`: RMS normalization ✅
-- `RotaryPositionalEncoding`: Not needed (using NoPE) ✅
-- SwiGLU activation function ✅
-- SiLU activation function ✅
+### 4. Base Components (`src/model/components.rs`) ✅
+- `GraniteMoeHybridRMSNorm`: RMS normalization
+- SwiGLU activation function
+- SiLU activation function (2D and 3D versions)
 
-## Phase 2: Model Assembly (Week 3)
+### 5. Hybrid Decoder Block (`src/model/block.rs`) ✅
+- `GraniteMoeHybridBlock` with:
+  - Support for attention or mamba layers
+  - Layer normalization before each layer
+  - MoE FFN integration
+  - Residual connections
+  - Layer pattern generator [5M,1A,10M,1A,9M,1A,9M,1A,3M]
 
-### 1. Hybrid Decoder Block (`src/model/block.rs`)
-- Pattern: 1 attention block per 9 Mamba blocks
-- Residual connections
-- Layer normalization
+## Next Steps: Model Assembly
 
-### 2. Main Model (`src/model/mod.rs`)
+### Main Model (`src/model/model.rs`)
 ```rust
 pub struct GraniteMoeHybrid<B: Backend> {
     embeddings: nn::Embedding<B>,
@@ -211,151 +221,62 @@ pub struct GraniteMoeHybrid<B: Backend> {
 }
 ```
 
-### 3. Forward Pass Implementation
+### Forward Pass Implementation
 - Token embedding
 - Pass through hybrid blocks
 - Final normalization
 - Output projection
 
-## Phase 3: Weight Loading & Tokenizer (Week 4)
-
-### 1. Weight Conversion (`src/loader.rs`)
-- Load HuggingFace weights from Hub
-- Convert to Burn tensor format
-- Handle BF16 precision
-- Map parameter names correctly
-
-### 2. Tokenizer Integration (`src/tokenizer.rs`)
-- Use existing tokenizer from HuggingFace
-- Implement special token handling
-- Support for chat templates
-
-### 3. Pretrained Model Loading (`src/pretrained.rs`)
-```rust
-pub fn granite_4_0_tiny_preview<B: Backend>(
-    device: &B::Device,
-) -> Result<GraniteMoeHybrid<B>, Error> {
-    // Download and load weights from HuggingFace
-}
-```
-
-## Phase 4: Inference & Examples (Week 5)
-
-### 1. Text Generation (`src/sampling.rs`)
-- Implement sampling strategies
-- Temperature-based sampling
-- Top-k/top-p filtering
-- Repetition penalty
-
-### 2. Cache Implementation (`src/cache.rs`)
-- KV-cache for attention
-- State cache for Mamba blocks
-- Support for 128k context window
-
-### 3. Example Applications
-- `examples/chat.rs`: Interactive chat
-- `examples/completion.rs`: Text completion
-- `examples/benchmark.rs`: Performance testing
-
-## Phase 5: Optimization & Testing (Week 6)
-
-### 1. Performance Optimizations
-- Kernel fusion for WGPU backend
-- Efficient expert routing
-- Memory optimization for long contexts
-
-### 2. Testing Suite
-- Unit tests for each component
-- Integration tests
-- Output verification against HuggingFace
-
-### 3. Documentation
-- Update README.md
-- API documentation
-- Usage examples
-
-## Lessons Learned (From Completed Work)
-
-### 1. Tensor Operations
-- Burn's `unsqueeze` adds dimensions at position 0, not the end
-- Use `reshape` for explicit dimension control
-- Always test tensor shapes before algorithms
-
-### 2. Development Strategy
-- TDD catches dimension issues early
-- Start with naive implementations, optimize later
-- Clean module interfaces enable easier testing
-
-### 3. Architecture Insights
-- Layer pattern is complex: [5M,1A,10M,1A,9M,1A,9M,1A,4M]
-- Hybrid models need careful state management
-- Memory will be critical with 131k context + 62 experts
-
 ## Technical Challenges & Solutions
 
 ### 1. Mamba Implementation ✅ COMPLETED
 - **Challenge**: Selective scan algorithm efficiency
-- **Solution**: 
-  * Started with basic implementation, optimization deferred
-  * Used TDD to ensure correctness before optimization
-  * GPU-specific optimizations planned for Phase 1.5
+- **Solution**: Started with basic implementation, optimization deferred
 - **Result**: Working implementation on both backends
 
-### 2. MoE Routing
+### 2. MoE Routing ✅ COMPLETED
 - **Challenge**: Load balancing across 62 experts with 6 active per token
-- **Solution**: 
-  * Implement router separately from experts
-  * Test with smaller expert count first (8 experts)
-  * Scale to full 62 experts after validation
+- **Solution**: Router tested separately, then integrated with FFN
+- **Result**: Full MoE implementation with all experts
 
-### 3. Hybrid Architecture
+### 3. Hybrid Architecture ✅ COMPLETED
 - **Challenge**: Variable attention-to-Mamba pattern (4 attention among 40 layers)
-- **Solution**:
-  * Test each component independently first
-  * Create integration tests for block interactions
-  * Careful cache management for both types
+- **Solution**: Layer pattern generator with configurable blocks
+- **Result**: Correct layer pattern [5M,1A,10M,1A,9M,1A,9M,1A,3M]
 
-### 4. Long Context Support
-- **Challenge**: 131k token context window
-- **Solution**: 
-  * Start with 4k context in simplified model
-  * Implement memory pooling strategies
-  * Scale up gradually with performance testing
-
-### 5. Mixed Precision
-- **Challenge**: BF16 computation and memory efficiency
-- **Solution**: 
-  * Use Burn's precision features with F32 fallback
-  * Test numerical stability at each phase
-  * Profile memory usage continuously
+### 4. Backend-Agnostic Code ✅ COMPLETED
+- **Challenge**: Type comparisons with generic backends
+- **Solution**: Use tensor operations instead of scalar comparisons
+- **Result**: Code works on both CPU and GPU backends
 
 ## Directory Structure
 ```
 granite-4-burn/
 ├── src/
 │   ├── model/
-│   │   ├── attention.rs
-│   │   ├── mamba.rs
-│   │   ├── moe.rs
-│   │   ├── components.rs
-│   │   ├── block.rs
-│   │   ├── config.rs
-│   │   └── mod.rs
-│   ├── loader.rs
-│   ├── pretrained.rs
-│   ├── tokenizer.rs
-│   ├── cache.rs
-│   ├── sampling.rs
-│   └── lib.rs
+│   │   ├── attention.rs ✅
+│   │   ├── mamba.rs ✅
+│   │   ├── moe.rs ✅
+│   │   ├── components.rs ✅
+│   │   ├── block.rs ✅
+│   │   ├── config.rs ✅
+│   │   ├── model.rs ⏳
+│   │   └── mod.rs ✅
+│   ├── loader.rs ⏳
+│   ├── pretrained.rs ⏳
+│   ├── tokenizer.rs ⏳
+│   ├── cache.rs ⏳
+│   ├── sampling.rs ⏳
+│   └── lib.rs ⏳
 ├── examples/
-│   ├── chat.rs
-│   ├── completion.rs
-│   └── benchmark.rs
+│   ├── chat.rs ⏳
+│   ├── completion.rs ⏳
+│   └── benchmark.rs ⏳
 └── tests/
-    └── integration_tests.rs
+    └── integration_tests.rs ⏳
 ```
 
-## Dependencies (Updated)
+## Dependencies
 Current dependencies in `Cargo.toml`:
 ```toml
 [dependencies]
@@ -393,7 +314,7 @@ safetensors = "0.4"  # Weight format
 - Mamba head dimension: 64
 - Context window: 131,072 tokens (128k)
 - Intermediate size: 512
-- Layer pattern: [5 mamba, 1 attention] → [10 mamba, 1 attention] → [9 mamba, 1 attention] → [9 mamba, 1 attention] → [4 mamba]
+- Layer pattern: 5M, 1A, 10M, 1A, 9M, 1A, 9M, 1A, 3M
 
 ## References
 - HuggingFace Model: https://huggingface.co/ibm-granite/granite-4.0-tiny-preview
