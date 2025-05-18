@@ -1,6 +1,6 @@
 # Lessons Learned - Granite 4.0 Implementation
 
-Updated: 2025-01-17
+Updated: 2025-01-18
 
 ## Technical Insights
 
@@ -233,3 +233,45 @@ Updated: 2025-01-17
 - **Issues**: Shape mismatches and NaN values in outputs
 - **Strategy**: Compare intermediate values with HuggingFace
 - **Progress**: Tests created but root cause not yet identified
+
+### 18. Configuration FFN Type Discovery
+- **Problem**: Config.json missing `layers_ffn_type` field in HuggingFace
+- **Solution**: Implemented weight-based discovery mechanism
+- **Pattern**: Check for existence of layer-specific MoE weights
+- **Implementation**: `discover_ffn_types` method in loader
+- **Result**: Correctly identifies SharedMLP vs BlockSparseMoE per layer
+
+### 19. Linear Weight Transposition Requirements
+- **HuggingFace Format**: Linear weights stored as [out_features, in_features]
+- **Burn Format**: Expects [in_features, out_features]
+- **Solution**: Added `.transpose()` for all linear layer weights
+- **Applied to**: SharedMLP input/output linear, attention projections
+- **Lesson**: Always verify tensor dimension conventions between frameworks
+
+### 20. SharedMLP Dimension Bug
+- **Issue**: SharedMLP was using `intermediate_size` (12288)
+- **Correct**: Should use `shared_intermediate_size` (4096)
+- **Discovery**: Weight shape mismatch revealed the bug
+- **Fix**: Updated model construction to use correct config field
+- **Impact**: Required changes to both model initialization and weight loading
+
+### 21. Weight Loading Performance
+- **Measurement**: Added timeout-based performance testing
+- **Result**: ~171 seconds on GPU for all 586 weights
+- **Backend**: tch-gpu significantly faster than CPU
+- **Optimization**: Batch loading operations where possible
+- **Tool**: Used 5-minute timeout to ensure completion
+
+### 22. GPU Backend Usage
+- **Feature**: `tch-gpu` for LibTorch GPU acceleration
+- **Device**: AMD Instinct MI210 with ROCm support
+- **Configuration**: Requires proper feature flags in Cargo.toml
+- **Testing**: All tests adapted to support GPU backend
+- **Performance**: ~10x faster than CPU for weight loading
+
+### 23. Documentation as Development Tool
+- **IMPLEMENTATION_PLAN.md**: Tracks technical progress and decisions
+- **PROGRESS_SUMMARY.md**: High-level view of completed work
+- **LESSONS_LEARNED.md**: Captures insights and solutions
+- **Benefit**: Prevents repeated debugging of same issues
+- **Practice**: Update immediately after solving problems

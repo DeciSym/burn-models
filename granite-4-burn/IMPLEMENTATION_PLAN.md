@@ -89,6 +89,10 @@ We follow **Test-Driven Development (TDD)** principles:
   - [x] Resolved configuration compatibility issues with HuggingFace
   - [x] Fixed router weight shape transposition
   - [x] Successfully loaded all FFN weights from HuggingFace
+  - [x] Implemented layer-specific FFN type discovery from weights
+  - [x] Fixed SharedMLP to use shared_intermediate_size instead of intermediate_size
+  - [x] Added weight transposition for SharedMLP linear layers
+  - [x] Tested weight loading performance: ~3 minutes for all 586 weights on GPU
 
 ### Phase 1.5: Performance Optimization (Week 4) - NEW
 - ⏳ **Optimizations**
