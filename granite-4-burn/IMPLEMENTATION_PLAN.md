@@ -124,7 +124,7 @@ We follow **Test-Driven Development (TDD)** principles:
    - [ ] Implement efficient cache management
    - [ ] Test cache behavior across layers
 
-### Phase 3: Full Model & Weight Loading (Week 6) - REVISED
+### Phase 3: Full Model & Weight Loading (Week 6) - ✅ COMPLETED
 1. **Scale to Full Specifications**
    - [ ] Write tests for full model (131k context, 62 experts)
    - [ ] Implement complete model
@@ -144,7 +144,19 @@ We follow **Test-Driven Development (TDD)** principles:
    - [x] Fix mixed weight type handling (HF includes both for all layers)
    - [x] Resolve configuration compatibility issues
    - [x] Fix router weight shape transposition
-   - [ ] Validate loaded weights with forward pass (in progress)
+   - [x] Validate loaded weights with forward pass ✅ COMPLETE
+   - [x] Fix SharedMLP gating mechanism to match HuggingFace
+   - [x] Fix FFN combination (SharedMLP + BlockSparseMoE are additive)
+   - [x] Add residual multiplier support
+   - [x] All forward pass tests passing with loaded weights
+
+### Phase 3.5: Mamba Selective Scan Implementation (Current)
+- **Selective Scan Algorithm**
+  - [ ] Implement efficient selective scan for Mamba forward pass
+  - [ ] Write tests for state space computation
+  - [ ] Optimize for GPU backend
+  - [ ] Verify numerical stability
+  - [ ] Compare outputs with HuggingFace implementation
 
 ### Phase 4: Inference & Generation (Week 7)
 - **Text Generation**

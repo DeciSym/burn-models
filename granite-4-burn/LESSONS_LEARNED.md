@@ -275,3 +275,40 @@ Updated: 2025-01-18
 - **LESSONS_LEARNED.md**: Captures insights and solutions
 - **Benefit**: Prevents repeated debugging of same issues
 - **Practice**: Update immediately after solving problems
+
+### 24. SharedMLP Gating Mechanism Discovery
+- **Problem**: Weight dimensions didn't match expected architecture
+- **Investigation**: HuggingFace weights showed input [2048,1536] but output [1536,1024]
+- **Discovery**: SharedMLP uses gating mechanism with chunked inputs
+- **Solution**: Input expands to 2x intermediate size, splits, activates one chunk, multiplies by other
+- **Implementation**: `hidden_states = activation(chunk1) * chunk2`
+- **Learning**: Always check reference implementation when dimensions don't match
+
+### 25. FFN Architecture Combination
+- **Problem**: Model failed with dimension mismatches in FFN layers
+- **Discovery**: HuggingFace combines SharedMLP and BlockSparseMoE additively
+- **Solution**: Changed from exclusive enum to separate optional fields
+- **Implementation**: `output = moe_output + shared_mlp_output`
+- **Impact**: Both FFN types can coexist and contribute to layer output
+- **Learning**: Don't assume architectural choices; verify with reference
+
+### 26. Residual Multiplier Implementation
+- **Discovery**: HuggingFace uses configurable residual multiplier
+- **Value**: 0.22 for Granite 4.0 Tiny
+- **Implementation**: Applied to both attention/mamba and FFN residual connections
+- **Formula**: `output = residual + layer_output * residual_multiplier`
+- **Learning**: Small architectural details can significantly impact model behavior
+
+### 27. Tensor Chunking in Burn
+- **Problem**: Slice syntax didn't work for tensor chunking
+- **Solution**: Use `narrow` method for splitting tensors
+- **Example**: `tensor.narrow(dim, start, length)` 
+- **Alternative**: Could use `chunk` method if available
+- **Learning**: Burn has different tensor manipulation APIs than PyTorch
+
+### 28. Forward Pass Debugging Strategy
+- **Approach**: Create minimal test cases with single layers
+- **Tools**: Use weight loading logs to verify dimensions
+- **Method**: Compare intermediate tensor shapes with reference
+- **Success**: Fixed all dimension mismatches systematically
+- **Learning**: Incremental testing is more effective than full model debugging
