@@ -312,3 +312,43 @@ Updated: 2025-01-18
 - **Method**: Compare intermediate tensor shapes with reference
 - **Success**: Fixed all dimension mismatches systematically
 - **Learning**: Incremental testing is more effective than full model debugging
+
+### 29. Selective Scan Implementation
+- **Challenge**: Implementing efficient state space computation for Mamba
+- **Approach**: Started with sequential implementation, GPU optimization deferred
+- **Key Insights**: 
+  - A matrix needs reshaping from [d_inner] to [d_inner, d_state]
+  - Delta expansion required to match input dimensions
+  - State evolution follows h_t = exp(delta * A) * h_{t-1} + delta * B * x_t
+- **Performance**: Sequential scan is slow for long sequences (>256 tokens)
+- **Learning**: Correctness first, optimization second
+
+### 30. Dimension Mismatch Resolution
+- **Problem**: Multiple dimension mismatches during Mamba forward pass
+- **Issues Found**:
+  - A_log was using dt_out_channels (48) instead of mamba_intermediate (3072)
+  - Delta tensor needed expansion from [batch, seq, 48] to [batch, seq, 3072]
+  - State space matrices required proper broadcasting
+- **Solution**: Fixed dimensions and added proper tensor expansions
+- **Learning**: Always verify tensor dimensions match mathematical formulation
+
+### 31. Module Organization
+- **Success**: Created separate mamba_selective_scan.rs module
+- **Benefit**: Clean separation between Mamba layer and scan algorithm
+- **Testing**: Easier to test scan algorithm independently
+- **Modularity**: Can optimize scan without touching Mamba implementation
+- **Learning**: Well-defined interfaces enable parallel development
+
+### 32. Test Performance in Debug vs Release
+- **Issue**: Some tests extremely slow in debug mode (>60 seconds)
+- **Cause**: Sequential scan over long sequences without optimization
+- **Solution**: Run tests in release mode for performance validation
+- **Workaround**: Reduce sequence lengths for debug mode testing
+- **Learning**: Performance-critical algorithms need optimization flags
+
+### 33. Documentation as Progress Tracking
+- **Practice**: Update docs immediately after completing features
+- **Files**: IMPLEMENTATION_PLAN.md, PROGRESS_SUMMARY.md, LESSONS_LEARNED.md
+- **Benefit**: Clear visibility into project status and decisions
+- **Communication**: Helps team understand progress without meetings
+- **Learning**: Living documentation is more valuable than post-project docs

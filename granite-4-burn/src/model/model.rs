@@ -10,7 +10,6 @@ use super::{
     config::GraniteMoeHybridConfig,
     attention::GraniteMoeHybridAttentionConfig,
     mamba::GraniteMoeHybridMambaConfig,
-    ffn::FFNConfig,
     block_sparse_moe::BlockSparseMoEConfig,
     shared_mlp::SharedMLPConfig,
     moe::GraniteMoeHybridRouterConfig,

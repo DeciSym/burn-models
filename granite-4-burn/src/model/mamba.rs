@@ -11,6 +11,7 @@ use burn::{
 };
 
 use super::components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig};
+use super::mamba_selective_scan::SelectiveScan;
 
 #[derive(Config)]
 pub struct GraniteMoeHybridMambaConfig {
@@ -53,8 +54,8 @@ impl GraniteMoeHybridMambaConfig {
         
         // State space parameters
         let dt_bias = Tensor::zeros([dt_out_channels], device);
-        let a_log = Tensor::ones([dt_out_channels], device).mul_scalar(-5.0); // Initialize with negative values
-        let d_param = Tensor::ones([dt_out_channels], device);
+        let a_log = Tensor::ones([mamba_intermediate], device).mul_scalar(-5.0); // Initialize with negative values
+        let d_param = Tensor::ones([mamba_intermediate], device);
         
         // Normalization layer
         let norm = GraniteMoeHybridRMSNormConfig {
@@ -111,7 +112,7 @@ pub struct GraniteMoeHybridMamba<B: Backend> {
 impl<B: Backend> GraniteMoeHybridMamba<B> {
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, seq_len, _] = hidden_states.dims();
-        let device = hidden_states.device();
+        let _device = hidden_states.device();
         
         // Input projection: expand to intermediate*2 + dt_out_channels
         let proj_states = self.in_proj.forward(hidden_states);
@@ -153,91 +154,32 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
         // Apply normalization
         let x_norm = self.norm.forward(x_conv);
         
-        // Create SSM matrices using learned parameters
-        let a = self.a_log.clone().exp(); // Convert from log space
-        let b = x_norm.clone(); // Use normalized input as B matrix
-        let c = x_norm.clone(); // Use normalized input as C matrix
-        // D parameter needs to be expanded to match batch and sequence dimensions
-        let d = self.d_param.clone()
-            .reshape([1, 1, self.dt_out_channels])
-            .expand([batch_size, seq_len, self.dt_out_channels]);
-
-        // TODO: Apply selective scan
-        // For now, just use identity
-        let ssm_states = x_norm;
+        // Expand delta to match x_norm dimensions
+        // delta is [batch, seq, dt_out_channels], we need [batch, seq, mamba_intermediate]
+        // We'll repeat the dt_out_channels across the mamba_intermediate dimension
+        let num_repeats = mamba_intermediate / self.dt_out_channels;
+        let delta_expanded = delta.repeat_dim(2, num_repeats);
+        
+        // Apply selective scan using the SelectiveScan module
+        let ssm_states = SelectiveScan::forward(
+            x_norm.clone(),
+            delta_expanded,
+            self.a_log.clone(),
+            x_norm.clone(),  // B matrix
+            x_norm.clone(),  // C matrix  
+            self.d_param.clone(),
+        );
         
         // Combine with gate
         let gated_states = ssm_states * activation::sigmoid(gate);
         
-        // Add multiplicative skip connection with D parameter
-        // D parameter is for dt pathway, need to broadcast properly
-        let y = gated_states; // For now, skip the D parameter multiplication
-        
         // Output projection back to hidden_size
-        let output = self.out_proj.forward(y);
+        let output = self.out_proj.forward(gated_states);
         
         output
     }
 }
 
-/// Selective scan algorithm for efficient state space computation
-fn selective_scan<B: Backend>(
-    x: Tensor<B, 3>,
-    a: Tensor<B, 2>,
-    b: Tensor<B, 3>,
-    c: Tensor<B, 3>,
-    delta: Tensor<B, 3>,
-) -> Tensor<B, 3> {
-    let [batch_size, seq_len, d_model] = x.dims();
-    let [_, d_state] = a.dims();
-    
-    // Initialize hidden state
-    let device = x.device();
-    let mut h = Tensor::zeros([batch_size, d_model, d_state], &device);
-    let mut outputs = Vec::with_capacity(seq_len);
-    
-    // Sequential scan (simplified version)
-    for t in 0..seq_len {
-        // Extract inputs at time t
-        let x_t = x.clone().slice([0..batch_size, t..t+1, 0..d_model]).squeeze::<2>(1); // [batch, d_model]
-        let b_t = b.clone().slice([0..batch_size, t..t+1, 0..d_state]).squeeze::<2>(1); // [batch, d_state]
-        let c_t = c.clone().slice([0..batch_size, t..t+1, 0..d_state]).squeeze::<2>(1); // [batch, d_state]
-        let delta_t = delta.clone().slice([0..batch_size, t..t+1, 0..d_model]).squeeze::<2>(1); // [batch, d_model]
-        
-        // Discretize A for this timestep
-        // A_bar = exp(delta_t * A)
-        // We need to compute exp(delta_t[b,i] * a[i,j]) for each b, i, j
-        // First reshape delta_t to add the state dimension
-        let delta_t_reshaped = delta_t.reshape([batch_size, d_model, 1]); // [batch, d_model, 1]
-        // Expand delta_t to match dimensions with a
-        let delta_expanded = delta_t_reshaped.expand([batch_size, d_model, d_state]); // [batch, d_model, d_state]
-        // Now expand a to have batch dimension
-        let a_reshaped = a.clone().reshape([1, d_model, d_state]); // [1, d_model, d_state]
-        let a_expanded = a_reshaped.expand([batch_size, d_model, d_state]); // [batch, d_model, d_state]
-        // Element-wise multiply and exp
-        let a_bar = (delta_expanded * a_expanded).exp();
-        
-        // Update hidden state: h_t = A_bar * h_{t-1} + B * x_t
-        let h_decay = h.clone() * a_bar; // [batch, d_model, d_state]
-        
-        // Compute outer product: x_t * b_t
-        let x_t_expanded = x_t.reshape([batch_size, d_model, 1]); // [batch, d_model, 1]
-        let b_t_expanded = b_t.reshape([batch_size, 1, d_state]); // [batch, 1, d_state]
-        let h_input = x_t_expanded.matmul(b_t_expanded); // [batch, d_model, d_state]
-        
-        h = h_decay + h_input;
-        
-        // Compute output: y_t = h_t @ c_t
-        let c_t_expanded = c_t.reshape([batch_size, d_state, 1]); // [batch, d_state, 1]
-        let y_t = h.clone().matmul(c_t_expanded); // [batch, d_model, 1]
-        let y_t_sq = y_t.squeeze::<2>(2); // [batch, d_model]
-        
-        outputs.push(y_t_sq.reshape([batch_size, 1, d_model])); // [batch, 1, d_model]
-    }
-    
-    // Concatenate outputs along sequence dimension
-    Tensor::cat(outputs, 1) // [batch, seq_len, d_model]
-}
 
 #[cfg(test)]
 mod tests {
@@ -370,7 +312,7 @@ mod tests {
         
         let mamba = config.init::<TestBackend>(&device);
         let batch_size = 1;
-        let seq_len = 512;  // Multiple of chunk_size
+        let seq_len = 64;  // Reduced for faster testing
         
         // Create input tensor
         let hidden_states = Tensor::<TestBackend, 3>::random(
@@ -402,8 +344,8 @@ mod tests {
         );
         
         // Create SSM parameters
-        let a = Tensor::<TestBackend, 2>::random(
-            [d_model, d_state],
+        let a_log = Tensor::<TestBackend, 1>::random(
+            [d_model],
             burn::tensor::Distribution::Normal(0.0, 1.0),
             &device,
         );
@@ -418,9 +360,10 @@ mod tests {
             &device,
         );
         let delta = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_model], &device);
+        let d_param = Tensor::<TestBackend, 1>::ones([d_model], &device);
         
-        // Test selective scan function (to be implemented)
-        let result = selective_scan(x.clone(), a, b, c, delta);
+        // Test selective scan function
+        let result = SelectiveScan::forward(x.clone(), delta, a_log, b, c, d_param);
         
         // Verify output shape
         assert_eq!(result.dims(), [batch_size, seq_len, d_model]);
@@ -449,13 +392,14 @@ mod tests {
         ).reshape([batch_size, seq_len, d_model]);
         
         // Create SSM parameters
-        let a = Tensor::<TestBackend, 2>::ones([d_model, d_state], &device).mul_scalar(0.9);
+        let a_log = Tensor::<TestBackend, 1>::ones([d_model], &device).mul_scalar(-0.1); // Log of 0.9
         let b = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_state], &device);
         let c = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_state], &device);
         let delta = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_model], &device);
+        let d_param = Tensor::<TestBackend, 1>::ones([d_model], &device);
         
         // Run selective scan
-        let result = selective_scan(x, a, b, c, delta);
+        let result = SelectiveScan::forward(x, delta, a_log, b, c, d_param);
         
         // Check causality: first half should be non-zero, but changes in second half input
         // should not affect first half output

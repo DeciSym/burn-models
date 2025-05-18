@@ -2,6 +2,7 @@ pub mod attention;
 pub mod components;
 pub mod config;
 pub mod mamba;
+pub mod mamba_selective_scan;
 pub mod moe;
 pub mod shared_mlp;
 pub mod block_sparse_moe;
