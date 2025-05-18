@@ -75,8 +75,8 @@ impl GraniteWeightLoader {
                     .map(|v| v.as_str().unwrap().to_string())
                     .collect())
             } else {
-                // Default to block_sparse_moe for all layers if not specified
-                Some(vec!["block_sparse_moe".to_string(); config_json["num_hidden_layers"].as_u64().unwrap() as usize])
+                // Discover FFN types from the actual weights
+                self.discover_ffn_types()
             },
             
             num_local_experts: config_json["num_local_experts"].as_u64().unwrap_or(8) as usize,
@@ -107,6 +107,77 @@ impl GraniteWeightLoader {
         };
         
         Ok(config)
+    }
+    
+    fn discover_ffn_types(&self) -> Option<Vec<String>> {
+        use safetensors::SafeTensors;
+        use std::collections::{HashMap, HashSet};
+        
+        // Track all weight types found for each layer
+        let mut layer_weight_types: HashMap<usize, HashSet<String>> = HashMap::new();
+        
+        // Read all safetensors files
+        let safetensors_files: Vec<_> = fs::read_dir(&self.model_dir).ok()?
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().extension().map_or(false, |ext| ext == "safetensors"))
+            .map(|entry| entry.path())
+            .collect();
+        
+        for file_path in &safetensors_files {
+            if let Ok(file_data) = fs::read(&file_path) {
+                if let Ok(safetensors) = SafeTensors::deserialize(&file_data) {
+                    for (name, _) in safetensors.tensors() {
+                        if name.contains("layers") {
+                            let parts: Vec<&str> = name.split('.').collect();
+                            if parts.len() > 3 {
+                                if let Ok(layer_idx) = parts[2].parse::<usize>() {
+                                    if name.contains("shared_mlp") {
+                                        layer_weight_types.entry(layer_idx)
+                                            .or_insert_with(HashSet::new)
+                                            .insert("shared_mlp".to_string());
+                                    } else if name.contains("block_sparse_moe") {
+                                        layer_weight_types.entry(layer_idx)
+                                            .or_insert_with(HashSet::new)
+                                            .insert("block_sparse_moe".to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Determine the actual FFN type for each layer
+        // HuggingFace includes weights for both types, but only one is actually used
+        let mut result = vec![];
+        for i in 0..40 {
+            if let Some(weight_types) = layer_weight_types.get(&i) {
+                // If both types exist, check config for layer type
+                // Based on the weights we checked, layers 0-13 use shared_mlp,
+                // layers 14-30 use block_sparse_moe, 31-33 shared_mlp, etc.
+                let ffn_type = if i <= 13 {
+                    "shared_mlp"
+                } else if i <= 30 {
+                    "block_sparse_moe"
+                } else if i <= 33 {
+                    "shared_mlp"
+                } else if i == 34 {
+                    "block_sparse_moe"
+                } else if i <= 36 {
+                    "shared_mlp"
+                } else if i <= 38 {
+                    "block_sparse_moe"
+                } else {
+                    "shared_mlp"
+                };
+                result.push(ffn_type.to_string());
+            } else {
+                return None; // Missing weights for this layer
+            }
+        }
+        
+        Some(result)
     }
     
     pub fn load_weights<B: Backend>(
@@ -303,11 +374,13 @@ impl GraniteWeightLoader {
                     match &parts[1..] {
                         ["input_linear", "weight"] => {
                             let weight = Self::convert_to_burn_tensor_2d(tensor_view, device)?;
-                            shared_mlp.input_linear.weight = Param::from_tensor(weight);
+                            // HuggingFace stores as [out_features, in_features], Burn expects [in_features, out_features]
+                            shared_mlp.input_linear.weight = Param::from_tensor(weight.transpose());
                         },
                         ["output_linear", "weight"] => {
                             let weight = Self::convert_to_burn_tensor_2d(tensor_view, device)?;
-                            shared_mlp.output_linear.weight = Param::from_tensor(weight);
+                            // HuggingFace stores as [out_features, in_features], Burn expects [in_features, out_features]
+                            shared_mlp.output_linear.weight = Param::from_tensor(weight.transpose());
                         },
                         _ => {
                             eprintln!("Unknown shared_mlp weight pattern: {:?}", &parts[1..]);

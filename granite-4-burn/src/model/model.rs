@@ -68,7 +68,7 @@ impl<B: Backend> GraniteMoeHybrid<B> {
                 "shared_mlp" => {
                     FFNConfig::SharedMLP(SharedMLPConfig {
                         hidden_size: config.hidden_size,
-                        intermediate_size: config.intermediate_size,
+                        intermediate_size: config.shared_intermediate_size,
                         hidden_act: config.hidden_act.clone(),
                         mlp_bias: false,
                     })
@@ -84,7 +84,7 @@ impl<B: Backend> GraniteMoeHybrid<B> {
                     FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
                         hidden_size: config.hidden_size,
                         expert_intermediate_size: config.intermediate_size,
-                        shared_intermediate_size: config.intermediate_size,
+                        shared_intermediate_size: config.shared_intermediate_size,
                         num_experts: config.num_local_experts,
                         num_experts_per_tok: config.num_experts_per_tok,
                         hidden_act: config.hidden_act.clone(),
@@ -106,7 +106,7 @@ impl<B: Backend> GraniteMoeHybrid<B> {
             FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
                 hidden_size: config.hidden_size,
                 expert_intermediate_size: config.intermediate_size,
-                shared_intermediate_size: config.intermediate_size,
+                shared_intermediate_size: config.shared_intermediate_size,
                 num_experts: config.num_local_experts,
                 num_experts_per_tok: config.num_experts_per_tok,
                 hidden_act: config.hidden_act.clone(),
