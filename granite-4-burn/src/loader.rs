@@ -70,11 +70,14 @@ impl GraniteWeightLoader {
                     .map(|v| v.as_str().unwrap().to_string())
                     .collect()),
             
-            layers_ffn_type: config_json["layers_ffn_type"]
-                .as_array()
-                .map(|arr| arr.iter()
+            layers_ffn_type: if let Some(arr) = config_json["layers_ffn_type"].as_array() {
+                Some(arr.iter()
                     .map(|v| v.as_str().unwrap().to_string())
-                    .collect()),
+                    .collect())
+            } else {
+                // Default to block_sparse_moe for all layers if not specified
+                Some(vec!["block_sparse_moe".to_string(); config_json["num_hidden_layers"].as_u64().unwrap() as usize])
+            },
             
             num_local_experts: config_json["num_local_experts"].as_u64().unwrap_or(8) as usize,
             num_experts_per_tok: config_json["num_experts_per_tok"].as_u64().unwrap_or(2) as usize,
