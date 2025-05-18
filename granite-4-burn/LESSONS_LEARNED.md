@@ -192,3 +192,44 @@ Updated: 2025-01-17
 - **Dimension Issues**: Tests caught 3D tensor handling requirements
 - **Weight Paths**: Tests exposed router.layer.weight pattern
 - **Lesson**: TDD not only ensures correctness but reveals requirements
+
+### 12. Expert Weight Extraction
+- **Challenge**: MoE weights stored as 3D tensors [num_experts, dim1, dim2]
+- **Solution**: Average across expert dimension for shared projections
+- **Implementation**: Added `convert_to_burn_tensor_3d` helper method
+- **Approach**: Use `mean_dim(0).squeeze(0)` to collapse expert dimension
+- **Transposition**: May need to transpose after averaging for correct dimensions
+
+### 13. Mixed Weight Type Handling
+- **Discovery**: HuggingFace includes both SharedMLP and BlockSparseMoE weights for all layers
+- **Problem**: Caused warnings when loading weights for wrong FFN type
+- **Solution**: Silently skip weights that don't match the layer's FFN type
+- **Implementation**: Remove warning messages for expected behavior
+- **Pattern**: Check FFN type before attempting to load weights
+
+### 14. Configuration-Based Architecture
+- **Design**: FFN type determined by `layers_ffn_type` configuration
+- **Flexibility**: Model can dynamically create SharedMLP or BlockSparseMoE per layer
+- **Testing**: Use minimal layer counts for faster weight loading tests
+- **Validation**: Verify FFN type matches expected configuration after loading
+
+### 15. Configuration Compatibility
+- **Challenge**: Rust configuration structure must match HuggingFace exactly
+- **Found Issues**: Missing optional fields, type mismatches, field name differences
+- **Solution**: Added all missing fields with proper Option<> types
+- **Fixed**: `mamba_d_inner` multiplication factor, `use_mamba_kernels` boolean
+- **Result**: Configuration now loads without errors from HuggingFace JSON
+
+### 16. Router Weight Transposition
+- **Discovery**: Router weights need transposition when loading
+- **HuggingFace**: Stores as [num_experts, hidden_size]
+- **Burn**: Expects [hidden_size, num_experts]
+- **Solution**: Added `.transpose()` during weight loading
+- **Validation**: Test confirmed correct shape after transposition
+
+### 17. Forward Pass Debugging
+- **Status**: Creating multiple isolated tests to debug failures
+- **Approach**: Test individual components before full model
+- **Issues**: Shape mismatches and NaN values in outputs
+- **Strategy**: Compare intermediate values with HuggingFace
+- **Progress**: Tests created but root cause not yet identified

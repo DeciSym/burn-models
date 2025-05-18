@@ -229,7 +229,7 @@ impl Default for GraniteMoeHybridConfig {
             intermediate_size: 11008,
             num_hidden_layers: 32,
             num_attention_heads: 32,
-            num_key_value_heads: Some(8),
+            num_key_value_heads: None,  // Fixed: HuggingFace default is None
             hidden_act: "silu".to_string(),
             tie_word_embeddings: false,
             initializer_range: 0.02,
@@ -247,7 +247,7 @@ impl Default for GraniteMoeHybridConfig {
             logits_scaling: 1.0,
             residual_multiplier: 1.0,
             attention_multiplier: 1.0,
-            num_local_experts: 64,
+            num_local_experts: 8,  // Fixed: HuggingFace default is 8
             num_experts_per_tok: 2,
             output_router_logits: false,
             router_aux_loss_coef: 0.001,

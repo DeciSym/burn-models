@@ -434,6 +434,10 @@ impl<B: Backend> GraniteMoeHybridFFN<B> {
 mod ffn_tests {
     use super::*;
     use burn::tensor::Distribution;
+    #[cfg(feature = "tch-gpu")]
+    use burn::backend::Autodiff;
+    #[cfg(feature = "tch-gpu")]
+    use burn_tch::{LibTorch, LibTorchDevice};
     
     #[cfg(feature = "tch-gpu")]
     type TestBackend = Autodiff<LibTorch>;

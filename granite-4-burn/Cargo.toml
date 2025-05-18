@@ -18,3 +18,5 @@ ndarray = ["burn/ndarray", "burn/autodiff"]
 [dev-dependencies]
 burn = { version = "0.17.0", features = ["tch", "autodiff"] }
 burn-tch = { version = "0.17.0" }
+safetensors = "0.4"
+serde_json = "1.0"
