@@ -61,19 +61,29 @@ impl<B: Backend> GraniteMoeHybrid<B> {
     }
     
     fn create_block_config(config: &GraniteMoeHybridConfig, layer_type: &str, layer_idx: usize) -> GraniteMoeHybridBlockConfig {
-        // Create FFN config based on the layer type from HuggingFace config
-        let ffn_config = if let Some(ffn_types) = &config.layers_ffn_type {
+        // Create FFN configs based on layer's FFN type
+        let (shared_mlp_config, block_sparse_moe_config) = if let Some(ffn_types) = &config.layers_ffn_type {
             // Use the FFN type from the config if available
             match ffn_types[layer_idx].as_str() {
                 "shared_mlp" => {
-                    FFNConfig::SharedMLP(SharedMLPConfig {
+                    // Only SharedMLP for this layer
+                    let mlp_config = SharedMLPConfig {
                         hidden_size: config.hidden_size,
-                        intermediate_size: config.shared_intermediate_size,
+                        intermediate_size: config.shared_intermediate_size,  // This is 1024, which expands to 2048 for gating
                         hidden_act: config.hidden_act.clone(),
                         mlp_bias: false,
-                    })
+                    };
+                    (Some(mlp_config), None)
                 },
                 "block_sparse_moe" => {
+                    // Both SharedMLP and BlockSparseMoE for this layer (HuggingFace combines them)
+                    let mlp_config = SharedMLPConfig {
+                        hidden_size: config.hidden_size,
+                        intermediate_size: config.shared_intermediate_size,  // This is 1024, which expands to 2048 for gating
+                        hidden_act: config.hidden_act.clone(),
+                        mlp_bias: false,
+                    };
+                    
                     let router_config = GraniteMoeHybridRouterConfig {
                         hidden_size: config.hidden_size,
                         num_experts: config.num_local_experts,
@@ -81,7 +91,7 @@ impl<B: Backend> GraniteMoeHybrid<B> {
                         router_type: "softmax".to_string(),
                         router_aux_loss_coef: config.router_aux_loss_coef as f32,
                     };
-                    FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
+                    let moe_config = BlockSparseMoEConfig {
                         hidden_size: config.hidden_size,
                         expert_intermediate_size: config.intermediate_size,
                         shared_intermediate_size: config.shared_intermediate_size,
@@ -90,12 +100,20 @@ impl<B: Backend> GraniteMoeHybrid<B> {
                         hidden_act: config.hidden_act.clone(),
                         mlp_bias: false,
                         router_config,
-                    })
+                    };
+                    (Some(mlp_config), Some(moe_config))
                 },
                 _ => panic!("Unknown FFN type: {}", ffn_types[layer_idx]),
             }
         } else {
-            // Default to BlockSparseMoE if no FFN types are specified
+            // Default to both SharedMLP and BlockSparseMoE if no FFN types specified
+            let mlp_config = SharedMLPConfig {
+                hidden_size: config.hidden_size,
+                intermediate_size: 2048,  // HuggingFace SharedMLP uses 2048 intermediate size
+                hidden_act: config.hidden_act.clone(),
+                mlp_bias: false,
+            };
+            
             let router_config = GraniteMoeHybridRouterConfig {
                 hidden_size: config.hidden_size,
                 num_experts: config.num_local_experts,
@@ -103,7 +121,7 @@ impl<B: Backend> GraniteMoeHybrid<B> {
                 router_type: "softmax".to_string(),
                 router_aux_loss_coef: config.router_aux_loss_coef as f32,
             };
-            FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
+            let moe_config = BlockSparseMoEConfig {
                 hidden_size: config.hidden_size,
                 expert_intermediate_size: config.intermediate_size,
                 shared_intermediate_size: config.shared_intermediate_size,
@@ -112,7 +130,8 @@ impl<B: Backend> GraniteMoeHybrid<B> {
                 hidden_act: config.hidden_act.clone(),
                 mlp_bias: false,
                 router_config,
-            })
+            };
+            (Some(mlp_config), Some(moe_config))
         };
         
         // Create layer-specific config
@@ -157,7 +176,9 @@ impl<B: Backend> GraniteMoeHybrid<B> {
             attention_config,
             mamba_config,
             layer_norm_eps: config.rms_norm_eps as f32,
-            ffn_config,
+            shared_mlp_config,
+            block_sparse_moe_config,
+            residual_multiplier: config.residual_multiplier as f32,
         }
     }
 

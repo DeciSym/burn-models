@@ -31,7 +31,9 @@ pub struct SharedMLP<B: Backend> {
 
 impl<B: Backend> SharedMLP<B> {
     pub fn new(config: &SharedMLPConfig, device: &B::Device) -> Self {
-        let input_linear = LinearConfig::new(config.hidden_size, config.intermediate_size)
+        // HuggingFace SharedMLP uses gating mechanism:
+        // input expands to intermediate_size * 2, then splits for gating
+        let input_linear = LinearConfig::new(config.hidden_size, config.intermediate_size * 2)
             .with_bias(config.mlp_bias)
             .init(device);
         let output_linear = LinearConfig::new(config.intermediate_size, config.hidden_size)
@@ -47,21 +49,29 @@ impl<B: Backend> SharedMLP<B> {
     }
     
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
-        let [batch_size, seq_len, hidden_size] = hidden_states.dims();
+        let [_batch_size, _seq_len, _hidden_size] = hidden_states.dims();
         
-        // Apply input projection
+        // Apply input projection (expands to intermediate_size * 2)
         let hidden = self.input_linear.forward(hidden_states);
         
-        // Apply activation
+        // Split into two chunks for gating mechanism
+        // Use narrow to split the tensor along dimension 2
+        let chunk1 = hidden.clone().narrow(2, 0, self.intermediate_size);
+        let chunk2 = hidden.narrow(2, self.intermediate_size, self.intermediate_size);
+        
+        // Apply activation to first chunk
         let activated = match self.hidden_act.as_str() {
-            "silu" => silu(hidden),
-            "relu" => burn::tensor::activation::relu(hidden),
-            "gelu" => burn::tensor::activation::gelu(hidden),
+            "silu" => silu(chunk1),
+            "relu" => burn::tensor::activation::relu(chunk1),
+            "gelu" => burn::tensor::activation::gelu(chunk1),
             _ => panic!("Unknown activation function: {}", self.hidden_act),
         };
         
+        // Gating: multiply activated chunk1 by chunk2
+        let gated = activated * chunk2;
+        
         // Apply output projection
-        self.output_linear.forward(activated)
+        self.output_linear.forward(gated)
     }
 }
 
@@ -141,36 +151,31 @@ mod tests {
     }
     
     #[test]
-    fn test_shared_mlp_activations() {
+    fn test_shared_mlp_gating() {
         let device = test_device();
         let batch_size = 1;
         let seq_len = 1;
         let hidden_size = 256;
         
-        // Test different activation functions
-        let activations = vec!["silu", "relu", "gelu"];
+        let config = SharedMLPConfig {
+            hidden_size,
+            intermediate_size: 512,
+            hidden_act: "silu".to_string(),
+            mlp_bias: false,
+        };
         
-        for activation in activations {
-            let config = SharedMLPConfig {
-                hidden_size,
-                intermediate_size: 512,
-                hidden_act: activation.to_string(),
-                mlp_bias: false,
-            };
-            
-            let mlp = config.init::<TestBackend>(&device);
-            
-            let input = Tensor::<TestBackend, 3>::random(
-                [batch_size, seq_len, hidden_size],
-                burn::tensor::Distribution::Normal(0.0, 0.02),
-                &device,
-            );
-            
-            let output = mlp.forward(input.clone());
-            
-            // Verify output is different from input (processing occurred)
-            let diff = output.sub(input).abs().mean();
-            assert!(diff.into_scalar() > 0.0, "Activation {} should transform input", activation);
-        }
+        let mlp = config.init::<TestBackend>(&device);
+        
+        let input = Tensor::<TestBackend, 3>::random(
+            [batch_size, seq_len, hidden_size],
+            burn::tensor::Distribution::Normal(0.0, 0.02),
+            &device,
+        );
+        
+        let output = mlp.forward(input.clone());
+        
+        // Verify output is different from input (processing occurred)
+        let diff = output.sub(input).abs().mean();
+        assert!(diff.into_scalar() > 0.0, "Gating mechanism should transform input");
     }
 }

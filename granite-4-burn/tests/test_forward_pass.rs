@@ -1,6 +1,6 @@
 use burn::{
     backend::NdArray,
-    tensor::{Int, Tensor},
+    tensor::{Int, Tensor, TensorData, Shape},
 };
 use granite_4_burn::{
     loader::GraniteWeightLoader,
@@ -128,13 +128,13 @@ fn test_forward_pass_with_real_tokens() {
     
     // Use some common token IDs (these would typically come from a tokenizer)
     // Using low token IDs which are more likely to be common tokens
-    let token_values = vec![1, 100, 200, 300, 400]; // Example token IDs
-    let input_ids = Tensor::<TestBackend, 2, Int>::from_data(
-        token_values.iter().cloned().collect::<Vec<i32>>().as_slice(),
-        &device
-    ).reshape([batch_size, seq_len]);
-    
+    let token_values = vec![1i32, 100, 200, 300, 400]; // Example token IDs
     println!("Input token IDs: {:?}", token_values);
+    
+    let input_ids = Tensor::<TestBackend, 2, Int>::from_data(
+        TensorData::new(token_values, burn::tensor::Shape::new([batch_size, seq_len])),
+        &device
+    );
     
     // Perform forward pass
     let output = model.forward(input_ids);

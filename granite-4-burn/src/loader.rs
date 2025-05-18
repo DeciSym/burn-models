@@ -370,7 +370,7 @@ impl GraniteWeightLoader {
             
             // FFN weights - both SharedMLP and BlockSparseMoE
             ["shared_mlp", ..] => {
-                if let Some(shared_mlp) = layer.ffn.as_mut_shared_mlp() {
+                if let Some(shared_mlp) = &mut layer.shared_mlp {
                     match &parts[1..] {
                         ["input_linear", "weight"] => {
                             let weight = Self::convert_to_burn_tensor_2d(tensor_view, device)?;
@@ -386,14 +386,10 @@ impl GraniteWeightLoader {
                             eprintln!("Unknown shared_mlp weight pattern: {:?}", &parts[1..]);
                         }
                     }
-                } else {
-                    // HuggingFace includes both weight types but we only use one based on config
-                    // This is not an error - just skip unused weights
-                    // eprintln!("Skipping shared_mlp weight for layer {} which uses block_sparse_moe", layer_idx);
                 }
             },
             ["block_sparse_moe", ..] => {
-                if let Some(block_sparse_moe) = layer.ffn.as_mut_block_sparse_moe() {
+                if let Some(block_sparse_moe) = &mut layer.block_sparse_moe {
                     match &parts[1..] {
                         ["router", "layer", "weight"] => {
                             // Load router weight (HuggingFace uses .layer in the path)
@@ -473,10 +469,6 @@ impl GraniteWeightLoader {
                             eprintln!("Unknown block_sparse_moe weight pattern: {:?}", &parts[1..]);
                         }
                     }
-                } else {
-                    // HuggingFace includes both weight types but we only use one based on config
-                    // This is not an error - just skip unused weights
-                    // eprintln!("Skipping block_sparse_moe weight for layer {} which uses shared_mlp", layer_idx);
                 }
             },
             

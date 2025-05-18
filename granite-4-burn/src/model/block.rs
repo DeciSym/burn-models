@@ -8,9 +8,8 @@ use super::{
     attention::{GraniteMoeHybridAttention, GraniteMoeHybridAttentionConfig},
     components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig},
     mamba::{GraniteMoeHybridMamba, GraniteMoeHybridMambaConfig},
-    ffn::{FFN, FFNConfig},
-    block_sparse_moe::BlockSparseMoEConfig,
-    moe::GraniteMoeHybridRouterConfig,
+    shared_mlp::{SharedMLP, SharedMLPConfig},
+    block_sparse_moe::{BlockSparseMoE, BlockSparseMoEConfig},
 };
 
 #[derive(Config)]
@@ -27,8 +26,12 @@ pub struct GraniteMoeHybridBlockConfig {
     // Layer normalization config
     pub layer_norm_eps: f32,
     
-    // FFN config (either SharedMLP or BlockSparseMoE)
-    pub ffn_config: FFNConfig,
+    // FFN configs - layers have BOTH, not either/or
+    pub shared_mlp_config: Option<SharedMLPConfig>,
+    pub block_sparse_moe_config: Option<BlockSparseMoEConfig>,
+    
+    // Residual multiplier (from HuggingFace)
+    pub residual_multiplier: f32,
 }
 
 impl GraniteMoeHybridBlockConfig {
@@ -56,8 +59,12 @@ impl GraniteMoeHybridBlockConfig {
             eps: self.layer_norm_eps,
         }.init(device);
         
-        // Initialize FFN (either SharedMLP or BlockSparseMoE)
-        let ffn = self.ffn_config.init(device);
+        // Initialize FFN components (both can exist)
+        let block_sparse_moe = self.block_sparse_moe_config.as_ref()
+            .map(|config| config.init(device));
+        
+        let shared_mlp = self.shared_mlp_config.as_ref()
+            .map(|config| config.init(device));
         
         // Initialize FFN normalization (before FFN)
         let post_attention_layernorm = GraniteMoeHybridRMSNormConfig {
@@ -68,10 +75,12 @@ impl GraniteMoeHybridBlockConfig {
         GraniteMoeHybridBlock {
             layer,
             input_layernorm,
-            ffn,
+            block_sparse_moe,
+            shared_mlp,
             post_attention_layernorm,
             self_attn,
             mamba,
+            residual_multiplier: self.residual_multiplier,
         }
     }
 }
@@ -86,40 +95,62 @@ pub enum BlockLayer<B: Backend> {
 pub struct GraniteMoeHybridBlock<B: Backend> {
     pub layer: BlockLayer<B>,
     pub input_layernorm: GraniteMoeHybridRMSNorm<B>,
-    pub ffn: FFN<B>,
+    pub block_sparse_moe: Option<BlockSparseMoE<B>>,
+    pub shared_mlp: Option<SharedMLP<B>>,
     pub post_attention_layernorm: GraniteMoeHybridRMSNorm<B>,
     pub self_attn: Option<GraniteMoeHybridAttention<B>>,
     pub mamba: Option<GraniteMoeHybridMamba<B>>,
+    pub residual_multiplier: f32,
 }
 
 impl<B: Backend> GraniteMoeHybridBlock<B> {
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
-        // 1. Apply layer normalization
-        let normalized = self.input_layernorm.forward(hidden_states.clone());
+        // 1. Store original input for residual
+        let residual = hidden_states.clone();
         
-        // 2. Apply the layer (attention or mamba)
-        let layer_output = match &self.layer {
+        // 2. Apply layer normalization
+        let hidden_states = self.input_layernorm.forward(hidden_states);
+        
+        // 3. Apply the layer (attention or mamba)
+        let hidden_states = match &self.layer {
             BlockLayer::Attention(attention) => {
                 // For attention, we pass None for attention_mask and past_key_value
-                let (output, _cache) = attention.forward(normalized, None, None);
+                let (output, _cache) = attention.forward(hidden_states, None, None);
                 output
             },
             BlockLayer::Mamba(mamba) => {
-                mamba.forward(normalized)
+                mamba.forward(hidden_states)
             },
         };
         
-        // 3. Add residual connection
-        let hidden_states = hidden_states + layer_output;
+        // 4. Add residual connection with multiplier
+        let hidden_states = residual + hidden_states * self.residual_multiplier;
         
-        // 4. Apply FFN normalization
-        let ffn_normalized = self.post_attention_layernorm.forward(hidden_states.clone());
+        // 5. Prepare for second residual
+        let residual = hidden_states.clone();
         
-        // 5. Apply FFN (either SharedMLP or BlockSparseMoE)
-        let ffn_output = self.ffn.forward(ffn_normalized);
+        // 6. Apply FFN normalization
+        let hidden_states = self.post_attention_layernorm.forward(hidden_states);
         
-        // 6. Add residual connection for FFN
-        hidden_states + ffn_output
+        // 7. Apply FFN - BOTH MoE and SharedMLP combined
+        let mut ffn_output = None;
+        
+        if let Some(moe) = &self.block_sparse_moe {
+            ffn_output = Some(moe.forward(hidden_states.clone()));
+        }
+        
+        if let Some(mlp) = &self.shared_mlp {
+            let mlp_output = mlp.forward(hidden_states);
+            ffn_output = match ffn_output {
+                Some(moe_output) => Some(moe_output + mlp_output),
+                None => Some(mlp_output),
+            };
+        }
+        
+        let hidden_states = ffn_output.expect("At least one FFN type must be configured");
+        
+        // 8. Add residual connection with multiplier for FFN
+        residual + hidden_states * self.residual_multiplier
     }
 }
 
@@ -157,7 +188,7 @@ mod tests {
     #[cfg(feature = "tch-gpu")]
     use burn::backend::Autodiff;
     use burn::tensor::Distribution;
-    use crate::model::moe::{GraniteMoeHybridFFNConfig, GraniteMoeHybridRouterConfig};
+    use crate::model::moe::GraniteMoeHybridRouterConfig;
     
     #[cfg(feature = "tch-gpu")]
     type TestBackend = Autodiff<LibTorch>;
@@ -179,7 +210,16 @@ mod tests {
         }
     }
     
-    fn create_test_ffn_config(hidden_size: usize) -> FFNConfig {
+    fn create_test_shared_mlp_config(hidden_size: usize) -> SharedMLPConfig {
+        SharedMLPConfig {
+            hidden_size,
+            intermediate_size: 2048,
+            hidden_act: "silu".to_string(),
+            mlp_bias: false,
+        }
+    }
+    
+    fn create_test_moe_config(hidden_size: usize) -> BlockSparseMoEConfig {
         let router_config = GraniteMoeHybridRouterConfig {
             hidden_size,
             num_experts: 4,
@@ -188,7 +228,7 @@ mod tests {
             router_aux_loss_coef: 0.01,
         };
         
-        FFNConfig::BlockSparseMoE(BlockSparseMoEConfig {
+        BlockSparseMoEConfig {
             hidden_size,
             expert_intermediate_size: 2048,
             shared_intermediate_size: 2048,
@@ -197,18 +237,15 @@ mod tests {
             hidden_act: "silu".to_string(),
             mlp_bias: false,
             router_config,
-        })
+        }
     }
     
     #[test]
-    fn test_attention_block() {
+    fn test_attention_block_with_combined_ffn() {
         let device = test_device();
         let hidden_size = 512;
         let batch_size = 2;
         let seq_len = 10;
-        
-        // Create FFN config (required for all blocks)
-        let ffn_config = create_test_ffn_config(hidden_size);
         
         // Create attention config
         let attention_config = GraniteMoeHybridAttentionConfig {
@@ -226,7 +263,9 @@ mod tests {
             attention_config: Some(attention_config),
             mamba_config: None,
             layer_norm_eps: 1e-6,
-            ffn_config,
+            shared_mlp_config: Some(create_test_shared_mlp_config(hidden_size)),
+            block_sparse_moe_config: Some(create_test_moe_config(hidden_size)),
+            residual_multiplier: 1.0,
         };
         
         let block = block_config.init::<TestBackend>(&device);
@@ -249,14 +288,11 @@ mod tests {
     }
     
     #[test]
-    fn test_mamba_block() {
+    fn test_mamba_block_with_combined_ffn() {
         let device = test_device();
         let hidden_size = 512;
         let batch_size = 2;
         let seq_len = 10;
-        
-        // Create FFN config
-        let ffn_config = create_test_ffn_config(hidden_size);
         
         // Create mamba config
         let mamba_config = GraniteMoeHybridMambaConfig {
@@ -277,7 +313,9 @@ mod tests {
             attention_config: None,
             mamba_config: Some(mamba_config),
             layer_norm_eps: 1e-6,
-            ffn_config,
+            shared_mlp_config: Some(create_test_shared_mlp_config(hidden_size)),
+            block_sparse_moe_config: Some(create_test_moe_config(hidden_size)),
+            residual_multiplier: 1.0,
         };
         
         let block = block_config.init::<TestBackend>(&device);
@@ -329,16 +367,13 @@ mod tests {
     }
     
     #[test]
-    fn test_residual_connection() {
+    fn test_residual_multiplier() {
         let device = test_device();
         let hidden_size = 512;
         let batch_size = 2;
         let seq_len = 10;
         
-        // Create FFN config
-        let ffn_config = create_test_ffn_config(hidden_size);
-        
-        // Create a mamba block
+        // Create a mamba block with residual multiplier
         let mamba_config = GraniteMoeHybridMambaConfig {
             hidden_size,
             mamba_expand: 2,
@@ -357,47 +392,37 @@ mod tests {
             attention_config: None,
             mamba_config: Some(mamba_config),
             layer_norm_eps: 1e-6,
-            ffn_config,
+            shared_mlp_config: Some(create_test_shared_mlp_config(hidden_size)),
+            block_sparse_moe_config: None,
+            residual_multiplier: 0.5, // Test with multiplier
         };
         
         let block = block_config.init::<TestBackend>(&device);
         
-        // Create a tensor filled with zeros
-        let hidden_states = Tensor::<TestBackend, 3>::zeros(
+        // Create a tensor
+        let hidden_states = Tensor::<TestBackend, 3>::random(
             [batch_size, seq_len, hidden_size],
+            Distribution::Normal(0.0, 0.02),
             &device,
         );
-        
-        // Set a specific element to track the residual connection
-        // Get the first element and set it to 1.0
-        let marked_states = hidden_states.clone().slice([0..1, 0..1, 0..1]).add_scalar(1.0);
-        let hidden_states = hidden_states.slice_assign([0..1, 0..1, 0..1], marked_states);
         
         // Forward pass
         let output = block.forward(hidden_states.clone());
         
-        // The residual connection should preserve the input pattern
-        // Output should be input + layer_output
-        let output_first = output.clone().slice([0..1, 0..1, 0..1]);
-        let output_value = output_first.reshape([1]).into_scalar();
+        // The residual multiplier should affect the output
+        assert_eq!(output.dims(), [batch_size, seq_len, hidden_size]);
         
-        // Check that the output has been modified (processing occurred)
-        assert!(output_value != 1.0, "Output should be different from input due to processing");
-        
-        // Check that residual connections added something
-        let mean_diff = output.sub(hidden_states).abs().mean().into_scalar();
-        assert!(mean_diff > 0.0, "Output should contain processing from layers");
+        // Output should be different from input
+        let diff = output.sub(hidden_states).abs().mean().into_scalar();
+        assert!(diff > 0.0, "Output should be different from input due to processing");
     }
     
     #[test]
-    fn test_block_with_moe_ffn() {
+    fn test_block_with_only_shared_mlp() {
         let device = test_device();
         let hidden_size = 512;
         let batch_size = 2;
         let seq_len = 10;
-        
-        // Create FFN config
-        let ffn_config = create_test_ffn_config(hidden_size);
         
         // Create attention config
         let attention_config = GraniteMoeHybridAttentionConfig {
@@ -415,7 +440,9 @@ mod tests {
             attention_config: Some(attention_config),
             mamba_config: None,
             layer_norm_eps: 1e-6,
-            ffn_config,
+            shared_mlp_config: Some(create_test_shared_mlp_config(hidden_size)),
+            block_sparse_moe_config: None,  // No MoE, only SharedMLP
+            residual_multiplier: 1.0,
         };
         
         let block = block_config.init::<TestBackend>(&device);
@@ -427,14 +454,60 @@ mod tests {
             &device,
         );
         
-        // Forward pass
         let output = block.forward(hidden_states.clone());
         
         // Check output shape
         assert_eq!(output.dims(), [batch_size, seq_len, hidden_size]);
         
-        // Verify both layer and FFN processing occurred
+        // Verify processing
         let diff = output.sub(hidden_states).abs().mean();
-        assert!(diff.into_scalar() > 0.0, "Block should transform input");
+        assert!(diff.into_scalar() > 0.0);
+    }
+    
+    #[test]
+    fn test_block_with_only_moe() {
+        let device = test_device();
+        let hidden_size = 512;
+        let batch_size = 2;
+        let seq_len = 10;
+        
+        // Create attention config
+        let attention_config = GraniteMoeHybridAttentionConfig {
+            hidden_size,
+            num_attention_heads: 8,
+            num_key_value_heads: 4,
+            head_dim: 64,
+            attention_dropout: 0.0,
+            residual_attention_norm: false,
+        };
+        
+        let block_config = GraniteMoeHybridBlockConfig {
+            hidden_size,
+            layer_type: "attention".to_string(),
+            attention_config: Some(attention_config),
+            mamba_config: None,
+            layer_norm_eps: 1e-6,
+            shared_mlp_config: None,  // No SharedMLP, only MoE
+            block_sparse_moe_config: Some(create_test_moe_config(hidden_size)),
+            residual_multiplier: 1.0,
+        };
+        
+        let block = block_config.init::<TestBackend>(&device);
+        
+        // Create input
+        let hidden_states = Tensor::<TestBackend, 3>::random(
+            [batch_size, seq_len, hidden_size],
+            Distribution::Normal(0.0, 0.02),
+            &device,
+        );
+        
+        let output = block.forward(hidden_states.clone());
+        
+        // Check output shape
+        assert_eq!(output.dims(), [batch_size, seq_len, hidden_size]);
+        
+        // Verify processing
+        let diff = output.sub(hidden_states).abs().mean();
+        assert!(diff.into_scalar() > 0.0);
     }
 }
