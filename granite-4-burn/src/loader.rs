@@ -185,6 +185,9 @@ impl GraniteWeightLoader {
         model: &mut GraniteMoeHybrid<B>,
         device: &B::Device,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        // Load the model config to check for tied embeddings
+        let config = self.load_config()?;
+        
         // Load index file to get weight file mapping
         let index_path = self.model_dir.join("model.safetensors.index.json");
         let index_str = fs::read_to_string(index_path)?;
@@ -215,6 +218,14 @@ impl GraniteWeightLoader {
                 self.load_weight(model, &weight_name, tensor, device)?;
                 total_loaded += 1;
             }
+        }
+        
+        // If embeddings are tied, copy embeddings weight to lm_head
+        if config.tie_word_embeddings {
+            println!("Tying embeddings to lm_head...");
+            let embeddings_weight = model.embeddings().weight.val().clone();
+            // Transpose the embeddings for lm_head
+            model.lm_head_mut().weight = Param::from_tensor(embeddings_weight.transpose());
         }
         
         println!("Loaded {} weights", total_loaded);

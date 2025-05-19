@@ -9,6 +9,7 @@ pub mod block_sparse_moe;
 pub mod ffn;
 pub mod block;
 pub mod model;
+pub mod tokenizer;
 
 pub use attention::{GraniteMoeHybridAttention, GraniteMoeHybridAttentionConfig};
 pub use components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig, swiglu, silu, silu_2d};
@@ -20,3 +21,4 @@ pub use block_sparse_moe::{BlockSparseMoE, BlockSparseMoEConfig};
 pub use ffn::FFN;
 pub use block::{GraniteMoeHybridBlock, GraniteMoeHybridBlockConfig};
 pub use model::GraniteMoeHybrid;
+pub use tokenizer::{Vocabulary, SpecialTokens};

@@ -1,0 +1,20 @@
+[package]
+name = "granite-4-burn-examples"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "text_completion"
+path = "text_completion.rs"
+
+[[bin]]
+name = "chat"
+path = "chat.rs"
+
+[dependencies]
+granite-4-burn = { path = ".." }
+burn = { version = "0.17.0", features = ["ndarray"] }
+burn-tch = { version = "0.17.0", optional = true }
+
+[features]
+tch-gpu = ["granite-4-burn/tch-gpu", "burn/tch", "burn-tch"]

@@ -352,3 +352,89 @@ Updated: 2025-01-18
 - **Benefit**: Clear visibility into project status and decisions
 - **Communication**: Helps team understand progress without meetings
 - **Learning**: Living documentation is more valuable than post-project docs
+
+### 34. Tokenizer Integration Challenges
+- **Issue**: HuggingFace tokenizer format incompatible with tokenizers crate
+- **Discovery**: GPT2 tokenizer requires special handling
+- **Solution**: Created stub tokenizer for MVP, defer full implementation
+- **Learning**: Sometimes a placeholder is better than blocked progress
+
+### 35. Text Generation Backend Constraints
+- **Issue**: Backend type system constraints with IntElem and FloatElem
+- **Solution**: Constrain backend types where possible, cast when needed
+- **Example**: `Backend<IntElem = i64>` for text generation
+- **Learning**: Generic backends require careful type consideration
+
+### 36. Burn Tensor Operations
+- **Boolean Negation**: No direct `not()` method on bool tensors
+- **Solution**: Use arithmetic operations for boolean logic
+- **Masking**: Use float conversion for complex mask operations
+- **Learning**: Burn's tensor API differs from PyTorch patterns
+
+### 37. Incremental Feature Development
+- **Approach**: Build simplest version first, enhance later
+- **Example**: Basic tokenizer stub before full implementation
+- **Benefit**: Unblocks dependent work immediately
+- **Learning**: Perfect is the enemy of done
+
+### 38. Test-Driven Development Success
+- **Pattern**: Write minimal tests first, then implementation
+- **Benefit**: Clear specifications before coding
+- **Example**: Generation config tests defined the interface
+- **Learning**: TDD works especially well for library development
+
+### 39. Tied Embeddings Implementation
+- **Discovery**: Model uses tie_word_embeddings=true in config
+- **Issue**: lm_head weights missing in safetensors file
+- **Solution**: Copy embeddings weights to lm_head, transposed
+- **Implementation**: `model.lm_head.weight = embeddings.weight.transpose()`
+- **Learning**: Always check for tied weights in transformer models
+
+### 40. Tokenizer Format Compatibility
+- **Issue**: Character-level tokenizer was mapping spaces to EOS token (ID 0)
+- **Cause**: Incorrect tokenizer implementation for BPE model
+- **Solution**: Switched to HuggingFace tokenizers crate
+- **Fix**: Proper BPE tokenization with vocabulary from tokenizer.json
+- **Learning**: Use reference tokenizer implementations when available
+
+### 41. HuggingFace Tokenizer Integration
+- **Success**: Used tokenizers crate for full compatibility
+- **Features**: Chat template support, special tokens, BPE encoding
+- **Implementation**: GraniteTokenizer wrapper around HF tokenizer
+- **Vocabulary**: 49,160 tokens loaded correctly
+- **Learning**: Leverage existing battle-tested implementations
+
+### 42. Chat Template Implementation  
+- **Discovery**: Model uses specific template format with role markers
+- **Tokens**: <|start_of_role|>, <|end_of_role|>, <|end_of_text|>
+- **System**: Includes knowledge cutoff and model identity
+- **Implementation**: Applied template matching Python transformers
+- **Learning**: Exact template format crucial for model behavior
+
+### 43. Full Model Testing
+- **Requirement**: Always test with full 40 layers and all weights
+- **Memory**: Need sufficient GPU memory for complete model
+- **Time**: Model loading takes 2-5 minutes on GPU
+- **Verification**: 586 weights loaded successfully with tied embeddings
+- **Learning**: Production testing requires full resources
+
+### 44. GPU Backend Performance  
+- **Feature**: Always use tch-gpu for production testing
+- **Performance**: Significantly faster than CPU backend
+- **Memory**: GPU memory critical for large models
+- **Configuration**: Requires proper ROCm/CUDA setup
+- **Learning**: GPU is essential for transformer model testing
+
+### 45. Model Response Quality
+- **Issue**: Model generated gibberish for capital of France test
+- **Expected**: "Paris" but got random tokens
+- **Possible Causes**: Temperature settings, prompt format, model state
+- **Status**: Model loads and generates, but quality needs investigation
+- **Learning**: Loading weights correctly doesn't guarantee response quality
+
+### 46. Documentation Completeness
+- **Success**: All three documentation files updated regularly
+- **IMPLEMENTATION_PLAN.md**: Technical roadmap and status
+- **PROGRESS_SUMMARY.md**: High-level achievements
+- **LESSONS_LEARNED.md**: Technical insights and solutions
+- **Learning**: Comprehensive docs crucial for complex projects

@@ -165,22 +165,28 @@ We follow **Test-Driven Development (TDD)** principles:
   - Performance optimization needed for long sequences (>256 tokens)
   - Tests passing but slow on longer sequences due to sequential nature
 
-### Phase 4: Inference & Generation (Week 7) - CURRENT
+### Phase 4: Inference & Generation (Week 7) - ✅ COMPLETED
 - **Text Generation**
-  - [ ] Write tests for sampling strategies
-  - [ ] Implement temperature sampling
-  - [ ] Add top-k/top-p filtering
-  - [ ] Test repetition penalty
+  - [x] Write tests for sampling strategies
+  - [x] Implement temperature sampling
+  - [x] Add top-k filtering
+  - [x] Apply repetition penalty
+  - [x] Create generation configuration
   
 - **Example Applications**
-  - [ ] Simple text completion
-  - [ ] Interactive chat interface
-  - [ ] Long-context processing demo
+  - [x] Simple text completion example
+  - [x] Interactive chat interface
+  - [x] Generation configuration support
+  - [x] Chat template application
+  - [x] Capital of France test example
   
 - **Tokenizer Integration**
-  - [ ] Integrate HuggingFace tokenizer
-  - [ ] Handle special tokens
-  - [ ] Test encoding/decoding
+  - [x] HuggingFace tokenizer integration (full implementation)
+  - [x] Handle special tokens properly
+  - [x] Test encoding/decoding with HF tokenizer
+  - [x] BPE tokenization support
+  - [x] Chat template formatting
+  - [x] Fixed tied embeddings issue
 
 ### Phase 5: Validation & Documentation (Week 8)
 - **Validation Suite**

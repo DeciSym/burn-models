@@ -34,8 +34,8 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         
         // Initialize layers based on the pattern
         let mut layers = Vec::new();
-        for (i, layer_type) in layer_types.iter().enumerate() {
-            let block_config = Self::create_block_config(config, layer_type, i);
+        for (i, _layer_type) in layer_types.iter().enumerate() {
+            let block_config = Self::create_block_config(config, i);
             let block = block_config.init(device);
             layers.push(block);
         }
@@ -59,7 +59,8 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         }
     }
     
-    fn create_block_config(config: &GraniteMoeHybridConfig, layer_type: &str, layer_idx: usize) -> GraniteMoeHybridBlockConfig {
+    pub fn create_block_config(config: &GraniteMoeHybridConfig, layer_idx: usize) -> GraniteMoeHybridBlockConfig {
+        let layer_type = &config.layer_types.as_ref().unwrap()[layer_idx];
         // Create FFN configs based on layer's FFN type
         let (shared_mlp_config, block_sparse_moe_config) = if let Some(ffn_types) = &config.layers_ffn_type {
             // Use the FFN type from the config if available
@@ -134,7 +135,7 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         };
         
         // Create layer-specific config
-        let (attention_config, mamba_config) = match layer_type {
+        let (attention_config, mamba_config) = match layer_type.as_str() {
             "attention" => {
                 let attention_config = GraniteMoeHybridAttentionConfig {
                     hidden_size: config.hidden_size,
@@ -202,6 +203,10 @@ impl<B: Backend> GraniteMoeHybrid<B> {
     }
     
     // Getters for accessing model components during weight loading
+    pub fn embeddings(&self) -> &Embedding<B> {
+        &self.embeddings
+    }
+    
     pub fn embeddings_mut(&mut self) -> &mut Embedding<B> {
         &mut self.embeddings
     }
