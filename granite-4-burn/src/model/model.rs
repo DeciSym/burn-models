@@ -230,6 +230,46 @@ impl<B: Backend> GraniteMoeHybrid<B> {
     pub fn get_lm_head_weight(&self) -> Tensor<B, 2> {
         self.lm_head.weight.val()
     }
+    
+    // Debug forward pass that captures intermediate outputs
+    pub fn forward_debug(
+        &self,
+        input_ids: Tensor<B, 2, Int>,
+        _cache_mask: Option<Tensor<B, 2, Bool>>,
+    ) -> DebugForwardOutput<B> {
+        let embeddings = self.embeddings.forward(input_ids.clone());
+        
+        let mut hidden_states = embeddings.clone();
+        let mut layer_outputs = Vec::new();
+        
+        // Process through layers
+        for layer in &self.layers {
+            hidden_states = layer.forward(hidden_states);
+            layer_outputs.push(hidden_states.clone());
+        }
+        
+        // Final layer norm
+        let final_hidden_states = self.norm.forward(hidden_states);
+        
+        // Compute logits
+        let logits = self.lm_head.forward(final_hidden_states.clone());
+        
+        DebugForwardOutput {
+            embeddings,
+            layer_outputs,
+            final_hidden_states,
+            logits,
+        }
+    }
+}
+
+// Structure to hold debug forward pass outputs
+#[derive(Debug)]
+pub struct DebugForwardOutput<B: Backend> {
+    pub embeddings: Tensor<B, 3>,
+    pub layer_outputs: Vec<Tensor<B, 3>>,
+    pub final_hidden_states: Tensor<B, 3>,
+    pub logits: Tensor<B, 3>,
 }
 
 #[cfg(test)]

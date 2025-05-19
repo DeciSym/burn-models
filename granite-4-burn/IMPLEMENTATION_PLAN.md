@@ -207,19 +207,25 @@ We follow **Test-Driven Development (TDD)** principles:
   - [x] Create HuggingFace output capture script (capture_hf_outputs.py)
   - [x] Identify and fix Mamba value explosion issue
   - [x] Fix tensor dimension mismatches in selective scan
+  - [x] Verify tokenizer works correctly (token IDs are different but consistent)
   - [ ] Debug non-coherent text generation
-  - [ ] Run comparison to identify remaining divergence points
+  - [ ] Run layer-by-layer comparison to identify divergence points
   - [ ] Validate on standard benchmarks (MMLU, HellaSwag, etc.)
   - [ ] Test edge cases (empty input, max length, special tokens)
   
   **Current Status**: Model generates text but output is nonsensical. Example outputs:
-  - "The capital of France is" → "Closes Est Est Closes employ employ estimatelientais employ"
-  - "Once upon a time" → "Closes Closes Closes Est Survey Est EstXYais T"
+  - "The capital of" → "smithy smithy smithy"
+  - Previously: "The capital of France is" → "Closes Est Est Closes employ employ estimatelientais employ"
   
-  **Identified Issues**:
+  **Progress Made**:
+  - Fixed Mamba value explosion (delta * B instead of delta * x * B)
+  - Tokenizer is working correctly - IDs are different from expected but consistent
+  - Model now generates non-zero tokens consistently
+  
+  **Remaining Issues**:
   - Model produces repeated, nonsensical words
-  - Top predictions include unrelated tokens like "rear", "utility", "profit" for "Paris"
-  - Model might have weight loading or tokenizer vocabulary mapping issues
+  - Need to compare layer-by-layer outputs with HuggingFace to find divergence
+  - Potential issues: weight loading, attention layers, or layer normalization
   
 - **Performance Benchmarking**
   - [ ] Create comprehensive benchmark suite
@@ -272,7 +278,7 @@ We follow **Test-Driven Development (TDD)** principles:
 - Environment configured with PyTorch libtorch for ROCm support
 - TDD approach enforced: tests written before implementation
 
-## Current Status: Phase 5 - Validation & Documentation (Debugging Non-Coherent Text)
+## Current Status: Phase 5 - Validation & Documentation (Value Explosion Issue Identified)
 
 ## Overview
 
@@ -346,15 +352,61 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - Forward pass implementation
   - Configuration-based initialization
 
-## Next Steps: Debug Text Generation
+## Next Steps: Fix Value Explosion
 
-### Text Generation Issues
-- Model generates text but it's nonsensical
-- Need to investigate:
-  - Weight loading correctness
-  - Tokenizer vocabulary mapping
-  - Attention layer functioning
-  - Layer-by-layer output comparison with HuggingFace
+### Root Cause Identified
+- **Problem**: Values explode through the 40 layers
+  - Initial embeddings: range [-0.11, 0.12]
+  - Final hidden states: range [-25, 38]
+  - Logits: range [-69, 82]
+- **Symptoms**: High logit scores for nonsensical tokens
+- **Diagnosis**: Missing or incorrect normalization causing exponential growth
+
+### Critical Issues to Fix
+1. **RMSNorm Implementation**
+   - Verify normalization is applied correctly after each layer
+   - Check if epsilon value matches HuggingFace (1e-5)
+   - Ensure pre-normalization architecture is followed
+
+2. **Residual Connections**
+   - Investigate if residuals are accumulating without proper scaling
+   - Check residual connection placement (before vs after normalization)
+   - Verify scaling factors if any are used
+
+3. **Layer Normalization Points**
+   - Ensure input_layernorm and post_attention_layernorm are applied
+   - Check if normalization happens before or after residual connections
+   - Verify final model.norm is applied before lm_head
+
+4. **Weight Loading Verification**
+   - Double-check normalization weights are loaded correctly
+   - Verify weight shapes match expected dimensions
+   - Check for any transposition or reshaping issues
+
+### Diagnostic Findings (2025-01-19)
+1. **Layer-by-Layer Analysis**
+   - Created comprehensive testing infrastructure
+   - Compared HuggingFace vs Burn layer outputs
+   - Identified value explosion starting from early layers
+
+2. **Tokenizer Validation**
+   - Verified tokenizer works correctly with round-trip tests
+   - Token IDs match expected mappings
+   - Issue is not tokenization-related
+
+3. **Value Range Analysis**
+   - Layer 0: values remain reasonable (±1.2)
+   - Layer 10: values expand to ±4.3
+   - Layer 20: values reach ±4.1
+   - Layer 30: values grow to ±4.7
+   - Final hidden: extreme values ±38
+   - Logits: catastrophic explosion ±82
+
+4. **Specific Test Results**
+   - Input "The capital of France is"
+   - Top prediction: Token 10009 ('nu') with score 60.37
+   - Expected: Token 9423 ('Paris') with score -13.61
+   - Shows complete failure of semantic understanding
 
 ## Technical Challenges & Solutions
 
@@ -378,10 +430,12 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
 - **Solution**: Use tensor operations instead of scalar comparisons
 - **Result**: Code works on both CPU and GPU backends
 
-### 5. Text Generation Quality ⚠️ IN PROGRESS
-- **Challenge**: Model outputs nonsensical text
-- **Solution**: Need to debug weight loading, tokenizer, and layer outputs
-- **Result**: Model generates tokens but not coherent text
+### 5. Text Generation Quality ⚠️ CRITICAL ISSUE IDENTIFIED
+- **Challenge**: Model outputs nonsensical text due to value explosion
+- **Root Cause**: Hidden states grow exponentially through layers (embeddings: ±0.1 → final: ±38 → logits: ±82)
+- **Diagnosis**: Missing or incorrect RMSNorm causing residual accumulation without proper scaling
+- **Solution**: Fix layer normalization, verify residual connections, check weight loading
+- **Result**: Currently produces incorrect token predictions with very high confidence
 
 ## Directory Structure
 ```
@@ -464,6 +518,40 @@ proptest = "1.0"   # For property testing
 - Vocabulary size: 49,160
 - Hidden size: 1,536
 - Number of layers: 40 (4 attention + 36 mamba)
+
+## Action Plan: Fix Value Explosion (Priority 1)
+
+### Immediate Tasks
+1. **Investigate RMSNorm Implementation**
+   - Compare our RMSNorm with HuggingFace reference
+   - Check epsilon value (should be 1e-5)
+   - Verify normalization is applied at correct points
+   - Test standalone RMSNorm with known inputs/outputs
+
+2. **Fix Residual Connections**
+   - Review block.rs forward pass logic
+   - Check if residuals are added before or after normalization
+   - Verify no double-residual additions
+   - Test with simplified single-layer model
+
+3. **Validate Weight Loading**
+   - Check normalization weight loading in loader.rs
+   - Verify weight names match HuggingFace keys
+   - Ensure no transposition during loading
+   - Add debug prints for norm weight statistics
+
+4. **Create Minimal Reproduction**
+   - Build single-layer test case
+   - Compare with HuggingFace layer outputs
+   - Identify exact point of divergence
+   - Fix in isolation before full model
+
+### Success Criteria
+- Values remain bounded through all 40 layers
+- Final hidden states in reasonable range (±5)
+- Logits produce sensible token predictions
+- Model generates coherent text
+
 - Number of attention heads: 12
 - Number of key-value heads: 4
 - Number of experts: 62
