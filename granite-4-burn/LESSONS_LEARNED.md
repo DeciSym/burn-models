@@ -438,3 +438,52 @@ Updated: 2025-01-18
 - **PROGRESS_SUMMARY.md**: High-level achievements
 - **LESSONS_LEARNED.md**: Technical insights and solutions
 - **Learning**: Comprehensive docs crucial for complex projects
+
+### 47. Generation Quality Issue
+- **Problem**: Model generates non-sensical output despite correct architecture
+- **Symptoms**: High confidence on wrong tokens, gibberish responses
+- **Investigation**: Tokenizer verified working, all weights loaded correctly
+- **Examples**: "What is the capital of France?" produces "mppmppmppmppcanvas kull..."
+- **Learning**: Working forward pass doesn't guarantee meaningful output
+
+### 48. Debug Strategy for Complex Models
+- **Approach**: Create multiple debug scripts to isolate issues
+- **Tools**: debug_logits_analysis.rs, debug_embeddings_vs_logits.rs
+- **Results**: Discovered model predicts unexpected tokens with high confidence
+- **Next Steps**: Compare layer outputs with HuggingFace reference
+- **Learning**: Systematic debugging requires specialized test scripts
+
+### 49. Tokenizer Validation
+- **Success**: HuggingFace tokenizer correctly encodes/decodes text
+- **Test**: "Paris" encodes to [926, 297], decodes correctly
+- **Vocabulary**: All 49,160 tokens accessible and decodable
+- **Special Tokens**: Properly recognized (<|end_of_text|>, etc.)
+- **Learning**: Eliminate I/O issues before debugging model internals
+
+### 50. Model Output Analysis
+- **Finding**: Model assigns 91%+ probability to incorrect tokens
+- **Pattern**: Consistently wrong across different inputs
+- **Example**: Token 0 predicts "multiline" instead of special token
+- **Hypothesis**: Weight loading or architecture implementation issue
+- **Learning**: High confidence doesn't mean correct predictions
+
+### 51. Tied Embeddings Verification
+- **Implementation**: Successfully shares weights between embeddings and lm_head
+- **Transposition**: Applied during weight loading
+- **Verification**: Shape matches expected [vocab_size, hidden_size]
+- **Result**: Issue not related to tied embeddings
+- **Learning**: Systematic elimination of potential causes
+
+### 52. Forward Pass Completeness
+- **Confirmed**: All layers process correctly without errors
+- **Components**: Embeddings → Layers → Norm → LM Head
+- **Shapes**: All tensor dimensions match expectations
+- **Issue**: Computation results in wrong probability distribution
+- **Learning**: Correct shapes don't guarantee correct values
+
+### 53. Debugging Non-Deterministic Models
+- **Challenge**: Model behavior depends on complex weight interactions
+- **Approach**: Test with known inputs and expected outputs
+- **Tools**: Simple token sequences, known good prompts
+- **Status**: Need HuggingFace reference for comparison
+- **Learning**: Transformer debugging requires reference implementations

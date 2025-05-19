@@ -152,7 +152,7 @@ impl GraniteWeightLoader {
         // HuggingFace includes weights for both types, but only one is actually used
         let mut result = vec![];
         for i in 0..40 {
-            if let Some(weight_types) = layer_weight_types.get(&i) {
+            if let Some(_weight_types) = layer_weight_types.get(&i) {
                 // If both types exist, check config for layer type
                 // Based on the weights we checked, layers 0-13 use shared_mlp,
                 // layers 14-30 use block_sparse_moe, 31-33 shared_mlp, etc.
@@ -287,7 +287,7 @@ impl GraniteWeightLoader {
         layer_idx: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Reconstruct the weight name for error messages
-        let weight_name = format!("model.layers.{}.{}", layer_idx, parts.join("."));
+        let _weight_name = format!("model.layers.{}.{}", layer_idx, parts.join("."));
         match parts {
             // Layer normalization
             ["input_layernorm", "weight"] => {
@@ -420,7 +420,7 @@ impl GraniteWeightLoader {
                                 return Err(format!("Expected 3D tensor for input_linear, got shape: {:?}", weight_shape).into());
                             }
                             
-                            let num_experts = weight_shape[0];
+                            let _num_experts = weight_shape[0];
                             let shared_dim = weight_shape[1];
                             let hidden_size = weight_shape[2];
                             
@@ -447,7 +447,7 @@ impl GraniteWeightLoader {
                                 return Err(format!("Expected 3D tensor for output_linear, got shape: {:?}", weight_shape).into());
                             }
                             
-                            let num_experts = weight_shape[0];
+                            let _num_experts = weight_shape[0];
                             let hidden_size = weight_shape[1];
                             let expert_dim = weight_shape[2];
                             
@@ -694,8 +694,8 @@ mod tests {
 
     #[test]
     fn test_weight_mapping_patterns() {
-        let device = test_device();
-        let loader = GraniteWeightLoader::new();
+        let _device = test_device();
+        let _loader = GraniteWeightLoader::new();
         
         // Test various weight name patterns
         let patterns = vec![
@@ -791,7 +791,7 @@ mod tests {
         model_config.num_hidden_layers = 1;  // Just one layer for testing
         model_config.layer_types = Some(vec!["mamba".to_string()]); // Ensure we have a mamba layer
         
-        let mut model = GraniteMoeHybrid::<TestBackend>::new(&model_config, &device);
+        let _model = GraniteMoeHybrid::<TestBackend>::new(&model_config, &device);
         
         // Try to load weights for the first mamba layer
         let model_path = loader.model_dir.join("model-00001-of-00003.safetensors"); 
@@ -855,7 +855,7 @@ mod tests {
     
     #[test]
     fn test_mamba_weight_loading_actual() -> Result<(), Box<dyn std::error::Error>>{
-        let device = test_device();
+        let _device = test_device();
         let loader = GraniteWeightLoader::new();
         
         // Check expected Mamba weights are present

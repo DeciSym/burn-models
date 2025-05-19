@@ -11,6 +11,10 @@ path = "text_completion.rs"
 name = "chat"
 path = "chat.rs"
 
+[[bin]]
+name = "test_generation_fixed"
+path = "test_generation_fixed.rs"
+
 [dependencies]
 granite-4-burn = { path = ".." }
 burn = { version = "0.17.0", features = ["ndarray"] }

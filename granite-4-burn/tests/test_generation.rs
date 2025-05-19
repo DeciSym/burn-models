@@ -6,6 +6,7 @@ use granite_4_burn::{
 };
 use burn::prelude::*;
 use burn::tensor::{Int, Tensor};
+use serde_json::json;
 
 // Configure backend for testing
 #[cfg(feature = "tch-gpu")]
@@ -76,6 +77,62 @@ fn test_text_generator_creation() {
     let tokenizer = GraniteTokenizer::from_pretrained().expect("Should load tokenizer");
     
     let _generator = TextGenerator::new(model, tokenizer, device);
+}
+
+#[test]
+fn test_generation_with_full_model_and_chat_template() {
+    let device = test_device();
+    
+    // 1. Load model configuration
+    let loader = GraniteWeightLoader::new();
+    let config = loader.load_config().expect("Should load model config");
+    
+    // 2. Create full model with all layers
+    let mut model = GraniteMoeHybrid::<TestBackend>::new(&config, &device);
+    
+    // 3. Load all weights
+    loader.load_weights(&mut model, &device).expect("Should load all weights");
+    
+    // 4. Load tokenizer with configuration
+    let tokenizer = GraniteTokenizer::from_pretrained().expect("Should load tokenizer");
+    
+    // 5. Test with chat template from tokenizer_config.json
+    let messages = vec![
+        json!({
+            "role": "user",
+            "content": "Count from 1 to 5"
+        })
+    ];
+    
+    let prompt_ids = tokenizer.apply_chat_template(&messages, false, true)
+        .expect("Should apply chat template");
+    let prompt_text = tokenizer.decode(&prompt_ids, false)
+        .expect("Should decode prompt");
+    
+    // Create generator
+    let mut generator = TextGenerator::new(model, tokenizer, device);
+    
+    // Generate with deterministic config
+    let config = GenerationConfig {
+        max_new_tokens: 20,
+        temperature: 0.1,  // Very low for deterministic output
+        top_k: Some(1),    // Only most likely token
+        do_sample: false,  // Greedy decoding
+        repetition_penalty: 1.0,
+        top_p: None,
+    };
+    
+    let output = generator.generate(&prompt_text, &config)
+        .expect("Should generate text");
+    
+    // Extract generated portion
+    let generated_only = output.trim_start_matches(&prompt_text).trim();
+    
+    println!("Prompt: {}", prompt_text);
+    println!("Generated: {}", generated_only);
+    
+    // Verify we generated something
+    assert!(!generated_only.is_empty(), "Should generate non-empty text");
 }
 
 #[test]

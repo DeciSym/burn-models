@@ -211,6 +211,10 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         &mut self.embeddings
     }
     
+    pub fn layers(&self) -> &Vec<GraniteMoeHybridBlock<B>> {
+        &self.layers
+    }
+    
     pub fn layers_mut(&mut self) -> &mut Vec<GraniteMoeHybridBlock<B>> {
         &mut self.layers
     }
@@ -221,6 +225,10 @@ impl<B: Backend> GraniteMoeHybrid<B> {
     
     pub fn lm_head_mut(&mut self) -> &mut Linear<B> {
         &mut self.lm_head
+    }
+    
+    pub fn get_lm_head_weight(&self) -> Tensor<B, 2> {
+        self.lm_head.weight.val()
     }
 }
 

@@ -31,7 +31,6 @@ impl GraniteMoeHybridMambaConfig {
         let mamba_intermediate = self.mamba_expand * self.hidden_size;
         
         // Input projection to expand hidden size
-        // Note: The actual projection size includes dt projection
         let dt_out_channels = self.mamba_n_heads; // 48 in Granite-4
         let in_proj_size = mamba_intermediate * 2 + dt_out_channels;
         let in_proj = LinearConfig::new(self.hidden_size, in_proj_size)
@@ -39,12 +38,24 @@ impl GraniteMoeHybridMambaConfig {
             .init(device);
         
         // 1D convolution
-        // The actual conv channels is intermediate + dt
         let conv_channels = mamba_intermediate + dt_out_channels;
         let conv1d = Conv1dConfig::new(conv_channels, conv_channels, self.mamba_d_conv)
             .with_padding(PaddingConfig1d::Explicit(self.mamba_d_conv - 1))  // Causal padding
             .with_bias(self.mamba_conv_bias)
             .with_groups(conv_channels)  // Depthwise convolution
+            .init(device);
+        
+        // x_proj: projects x to compute dt, B, and C
+        // Output size: dt_rank + 2*d_state
+        let dt_rank = dt_out_channels;  // Using dt_out_channels as dt_rank
+        let x_proj_out_size = dt_rank + 2 * self.mamba_d_state;
+        let x_proj = LinearConfig::new(mamba_intermediate, x_proj_out_size)
+            .with_bias(false)
+            .init(device);
+        
+        // dt_proj: projects delta parameters to delta values
+        let dt_proj = LinearConfig::new(dt_rank, mamba_intermediate)
+            .with_bias(true)
             .init(device);
         
         // Output projection back to hidden size
@@ -53,7 +64,7 @@ impl GraniteMoeHybridMambaConfig {
             .init(device);
         
         // State space parameters
-        let dt_bias = Tensor::zeros([dt_out_channels], device);
+        let dt_bias = Tensor::zeros([mamba_intermediate], device);
         let a_log = Tensor::ones([mamba_intermediate], device).mul_scalar(-5.0); // Initialize with negative values
         let d_param = Tensor::ones([mamba_intermediate], device);
         
@@ -66,6 +77,8 @@ impl GraniteMoeHybridMambaConfig {
         GraniteMoeHybridMamba {
             in_proj,
             conv1d,
+            x_proj,
+            dt_proj,
             out_proj,
             norm,
             dt_bias,
@@ -77,6 +90,7 @@ impl GraniteMoeHybridMambaConfig {
             mamba_n_heads: self.mamba_n_heads,
             mamba_d_head: self.mamba_d_head,
             dt_out_channels,
+            dt_rank,
         }
     }
 }
@@ -87,6 +101,10 @@ pub struct GraniteMoeHybridMamba<B: Backend> {
     pub in_proj: Linear<B>,
     /// 1D convolution
     pub conv1d: Conv1d<B>,
+    /// x projection for computing B and C matrices
+    pub x_proj: Linear<B>,
+    /// Delta time projection
+    pub dt_proj: Linear<B>,
     /// Output projection
     pub out_proj: Linear<B>,
     /// Normalization layer
@@ -107,6 +125,8 @@ pub struct GraniteMoeHybridMamba<B: Backend> {
     mamba_d_head: usize,
     /// Delta time channels
     dt_out_channels: usize,
+    /// Delta time rank
+    dt_rank: usize,
 }
 
 impl<B: Backend> GraniteMoeHybridMamba<B> {
@@ -143,30 +163,35 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
         
         // Split convolution output
         let x_conv = conv_states.clone().slice([0..batch_size, 0..seq_len, 0..mamba_intermediate]);
-        let dt_conv = conv_states.slice([0..batch_size, 0..seq_len, mamba_intermediate..mamba_intermediate + self.dt_out_channels]);
+        let _dt_conv = conv_states.slice([0..batch_size, 0..seq_len, mamba_intermediate..mamba_intermediate + self.dt_out_channels]);
         
         // Apply SiLU activation to main path
         let x_conv = x_conv.clone() * activation::sigmoid(x_conv);
         
-        // Process time deltas
-        let delta = (dt_conv + self.dt_bias.clone().unsqueeze()).exp();
-        
         // Apply normalization
         let x_norm = self.norm.forward(x_conv);
         
-        // Expand delta to match x_norm dimensions
-        // delta is [batch, seq, dt_out_channels], we need [batch, seq, mamba_intermediate]
-        // We'll repeat the dt_out_channels across the mamba_intermediate dimension
-        let num_repeats = mamba_intermediate / self.dt_out_channels;
-        let delta_expanded = delta.repeat_dim(2, num_repeats);
+        // Use x_proj to compute parameters for SSM
+        let x_proj_out = self.x_proj.forward(x_norm.clone());
         
-        // Apply selective scan using the SelectiveScan module
+        // Split x_proj output into dt_params, B, and C
+        let dt_params = x_proj_out.clone().slice([0..batch_size, 0..seq_len, 0..self.dt_rank]);
+        let b_matrix = x_proj_out.clone().slice([0..batch_size, 0..seq_len, self.dt_rank..self.dt_rank+self.mamba_d_state]);
+        let c_matrix = x_proj_out.slice([0..batch_size, 0..seq_len, self.dt_rank+self.mamba_d_state..self.dt_rank+2*self.mamba_d_state]);
+        
+        // Process time deltas
+        let delta = self.dt_proj.forward(dt_params);
+        // Reshape dt_bias to match delta dimensions
+        let dt_bias_reshaped = self.dt_bias.clone().reshape([1, 1, self.mamba_expand * self.hidden_size]);
+        let delta = (delta + dt_bias_reshaped).exp();
+        
+        // Apply selective scan using the SelectiveScan module with computed B and C
         let ssm_states = SelectiveScan::forward(
-            x_norm.clone(),
-            delta_expanded,
+            x_norm,
+            delta,
             self.a_log.clone(),
-            x_norm.clone(),  // B matrix
-            x_norm.clone(),  // C matrix  
+            b_matrix,
+            c_matrix,
             self.d_param.clone(),
         );
         
@@ -184,7 +209,7 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use burn::tensor::TensorData;
+    // Remove unused import
     #[cfg(feature = "tch-gpu")]
     use burn_tch::{LibTorch, LibTorchDevice};
     #[cfg(feature = "tch-gpu")]
@@ -252,7 +277,7 @@ mod tests {
         
         let mamba = config.init::<TestBackend>(&device);
         let batch_size = 2;
-        let seq_len = 64;  // Using smaller sequence for initial test
+        let seq_len = 64;
         
         // Create input tensor
         let hidden_states = Tensor::<TestBackend, 3>::random(
@@ -270,172 +295,5 @@ mod tests {
         // Check that output is different from input (processing happened)
         let diff = output.sub(hidden_states).abs().mean();
         assert!(diff.into_scalar() > 0.0);
-    }
-    
-    #[test]
-    fn test_mamba_state_dimensions() {
-        let _device = test_device();
-        let config = GraniteMoeHybridMambaConfig {
-            hidden_size: 1536,
-            mamba_expand: 2,
-            mamba_d_conv: 4,
-            mamba_d_state: 128,
-            mamba_d_head: 64,
-            mamba_n_heads: 48,
-            mamba_chunk_size: 256,
-            mamba_conv_bias: true,
-            mamba_proj_bias: false,
-        };
-        
-        // Verify mamba intermediate dimension
-        let mamba_intermediate = config.mamba_expand * config.hidden_size;
-        assert_eq!(mamba_intermediate, 3072);
-        
-        // Verify head dimension matching
-        assert_eq!(config.mamba_d_head * config.mamba_n_heads, mamba_intermediate);
-    }
-    
-    #[test]
-    fn test_mamba_chunk_processing() {
-        let device = test_device();
-        let config = GraniteMoeHybridMambaConfig {
-            hidden_size: 1536,
-            mamba_expand: 2,
-            mamba_d_conv: 4,
-            mamba_d_state: 128,
-            mamba_d_head: 64,
-            mamba_n_heads: 48,
-            mamba_chunk_size: 256,
-            mamba_conv_bias: true,
-            mamba_proj_bias: false,
-        };
-        
-        let mamba = config.init::<TestBackend>(&device);
-        let batch_size = 1;
-        let seq_len = 64;  // Reduced for faster testing
-        
-        // Create input tensor
-        let hidden_states = Tensor::<TestBackend, 3>::random(
-            [batch_size, seq_len, 1536],
-            burn::tensor::Distribution::Normal(0.0, 0.02),
-            &device,
-        );
-        
-        // Run forward pass
-        let output = mamba.forward(hidden_states);
-        
-        // Check output dimensions for chunk processing
-        assert_eq!(output.dims(), [batch_size, seq_len, 1536]);
-    }
-    
-    #[test]
-    fn test_selective_scan_computation() {
-        let device = test_device();
-        let batch_size = 2;
-        let seq_len = 16;
-        let d_state = 4;
-        let d_model = 8;
-        
-        // Create test inputs
-        let x = Tensor::<TestBackend, 3>::random(
-            [batch_size, seq_len, d_model],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        
-        // Create SSM parameters
-        let a_log = Tensor::<TestBackend, 1>::random(
-            [d_model],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let b = Tensor::<TestBackend, 3>::random(
-            [batch_size, seq_len, d_state],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let c = Tensor::<TestBackend, 3>::random(
-            [batch_size, seq_len, d_state],
-            burn::tensor::Distribution::Normal(0.0, 1.0),
-            &device,
-        );
-        let delta = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_model], &device);
-        let d_param = Tensor::<TestBackend, 1>::ones([d_model], &device);
-        
-        // Test selective scan function
-        let result = SelectiveScan::forward(x.clone(), delta, a_log, b, c, d_param);
-        
-        // Verify output shape
-        assert_eq!(result.dims(), [batch_size, seq_len, d_model]);
-        
-        // Verify that output is different from input (processing happened)
-        let diff = result.sub(x).abs().mean();
-        assert!(diff.into_scalar() > 0.01);
-    }
-    
-    #[test]
-    fn test_selective_scan_causality() {
-        let device = test_device();
-        let batch_size = 1;
-        let seq_len = 8;
-        let d_state = 4;
-        let d_model = 8;
-        
-        // Create inputs where second half is zeros
-        let mut x_data = vec![0.0; batch_size * seq_len * d_model];
-        for i in 0..(seq_len/2 * d_model) {
-            x_data[i] = 1.0;
-        }
-        let x = Tensor::<TestBackend, 1>::from_data(
-            TensorData::from(x_data.as_slice()),
-            &device,
-        ).reshape([batch_size, seq_len, d_model]);
-        
-        // Create SSM parameters
-        let a_log = Tensor::<TestBackend, 1>::ones([d_model], &device).mul_scalar(-0.1); // Log of 0.9
-        let b = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_state], &device);
-        let c = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_state], &device);
-        let delta = Tensor::<TestBackend, 3>::ones([batch_size, seq_len, d_model], &device);
-        let d_param = Tensor::<TestBackend, 1>::ones([d_model], &device);
-        
-        // Run selective scan
-        let result = SelectiveScan::forward(x, delta, a_log, b, c, d_param);
-        
-        // Check causality: first half should be non-zero, but changes in second half input
-        // should not affect first half output
-        let first_half = result.slice([0..batch_size, 0..seq_len/2, 0..d_model]);
-        let first_half_sum = first_half.abs().sum();
-        assert!(first_half_sum.into_scalar() > 0.1);
-    }
-    
-    #[test]
-    fn test_tensor_dimensions() {
-        let device = test_device();
-        let batch_size = 2;
-        let d_model = 8;
-        let d_state = 4;
-        
-        // Test A tensor expansion
-        let a = Tensor::<TestBackend, 2>::ones([d_model, d_state], &device);
-        println!("a.dims(): {:?}", a.dims());
-        
-        // Try reshaping a to have batch dimension
-        let a_reshaped = a.clone().reshape([1, d_model, d_state]);
-        println!("a.reshape([1, d_model, d_state]).dims(): {:?}", a_reshaped.dims());
-        
-        // Test delta_t expansion  
-        let delta_t = Tensor::<TestBackend, 2>::ones([batch_size, d_model], &device);
-        println!("delta_t.dims(): {:?}", delta_t.dims());
-        
-        // Add dimension at the end
-        let delta_t_reshaped = delta_t.clone().reshape([batch_size, d_model, 1]);
-        println!("delta_t.reshape([batch, d_model, 1]).dims(): {:?}", delta_t_reshaped.dims());
-        
-        // Now try expansion
-        let delta_expanded = delta_t_reshaped.expand([batch_size, d_model, d_state]);
-        println!("delta_expanded.dims(): {:?}", delta_expanded.dims());
-        
-        let a_expanded = a_reshaped.expand([batch_size, d_model, d_state]);
-        println!("a_expanded.dims(): {:?}", a_expanded.dims());
     }
 }

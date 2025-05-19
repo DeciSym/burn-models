@@ -12,6 +12,8 @@ safetensors = "0.4"
 bincode = "1.3"
 tokenizers = "0.21.1"
 anyhow = "1.0"
+ndarray = "0.15"
+ndarray-npy = "0.8"
 
 [features]
 default = ["ndarray"]
@@ -23,7 +25,25 @@ burn = { version = "0.17.0", features = ["tch", "autodiff"] }
 burn-tch = { version = "0.17.0" }
 safetensors = "0.4"
 serde_json = "1.0"
+ndarray = "0.15"
+ndarray-npy = "0.8"
 
 [[bin]]
 name = "vocab_utils"
 path = "src/bin/vocab_utils.rs"
+
+[[example]]
+name = "debug_layer_comparison"
+path = "examples/debug_layer_comparison.rs"
+
+[[example]]
+name = "debug_mamba_layer"
+path = "examples/debug_mamba_layer.rs"
+
+[[example]]
+name = "debug_mamba_layer_tch"
+path = "examples/debug_mamba_layer_tch.rs"
+
+[[example]]
+name = "debug_mamba_fixed"
+path = "examples/debug_mamba_fixed.rs"

@@ -94,20 +94,25 @@ We follow **Test-Driven Development (TDD)** principles:
   - [x] Added weight transposition for SharedMLP linear layers
   - [x] Tested weight loading performance: ~3 minutes for all 586 weights on GPU
 
-### Phase 1.5: Performance Optimization (Week 4) - NEW
-- ⏳ **Optimizations**
-  - [ ] Write performance benchmarks
-  - [ ] Optimize Mamba selective scan for GPU
-  - [ ] Implement kernel fusion for MoE operations
-  - [ ] Memory pooling for large contexts
-  - [ ] Profile and optimize bottlenecks
+### Phase 1.5: Performance Optimization (Week 4) - Critical Path
+- **GPU Kernel Optimizations**
+  - [ ] Implement parallel selective scan for Mamba layers
+  - [ ] Fused attention kernels for memory efficiency
+  - [ ] Optimized expert routing with minimal memory copies
+  - [ ] Batch matrix operations for MoE layers
   
-- ⏳ **Memory Management**
-  - [ ] Implement basic KV cache system
-  - [ ] Add Mamba state cache
-  - [ ] Memory profiling tools
-  - [ ] Gradient checkpointing preparation
-  - [ ] Expert weight memory mapping research
+- **Memory Management**
+  - [ ] Implement KV cache with dynamic sizing
+  - [ ] Add Mamba state cache with efficient reuse
+  - [ ] Memory pooling for variable-length sequences
+  - [ ] Gradient checkpointing for training/fine-tuning
+  - [ ] Zero-copy tensor operations where possible
+  
+- **Inference Optimizations**
+  - [ ] Implement Flash Attention for long contexts
+  - [ ] Add support for model quantization (int8/int4)
+  - [ ] Optimize tokenizer with batch encoding
+  - [ ] Implement continuous batching for serving
 
 ### Phase 2: Model Assembly (Week 5) ✅ COMPLETED
 1. **Complete Model Implementation**
@@ -165,7 +170,7 @@ We follow **Test-Driven Development (TDD)** principles:
   - Performance optimization needed for long sequences (>256 tokens)
   - Tests passing but slow on longer sequences due to sequential nature
 
-### Phase 4: Inference & Generation (Week 7) - ✅ COMPLETED
+### Phase 4: Inference & Generation (Week 7) - ✅ COMPLETED WITH ISSUES
 - **Text Generation**
   - [x] Write tests for sampling strategies
   - [x] Implement temperature sampling
@@ -188,18 +193,76 @@ We follow **Test-Driven Development (TDD)** principles:
   - [x] Chat template formatting
   - [x] Fixed tied embeddings issue
 
-### Phase 5: Validation & Documentation (Week 8)
-- **Validation Suite**
-  - [ ] Write comparison tests with HuggingFace outputs
-  - [ ] Implement gradient checking
-  - [ ] Validate numerical stability
-  - [ ] Performance benchmarking
+- **Generation Issues Identified and Fixed**
+  - [x] Fixed tensor dimension mismatch in Mamba selective scan
+  - [x] Fixed value explosion in Mamba layer (incorrect matrix multiplication order)
+  - [x] Fixed missing x_proj layer in Mamba implementation
+  - [x] Fixed dt_bias dimension mismatch
+  - [x] Model now generates non-zero tokens (not just spaces)
+  - [ ] Text generation is not coherent - outputs nonsensical words
 
+### Phase 5: Validation & Documentation (Week 8) - ACTIVE
+- **Parity Testing** - IN PROGRESS
+  - [x] Implement layer comparison tools (debug_layer_comparison.rs)
+  - [x] Create HuggingFace output capture script (capture_hf_outputs.py)
+  - [x] Identify and fix Mamba value explosion issue
+  - [x] Fix tensor dimension mismatches in selective scan
+  - [ ] Debug non-coherent text generation
+  - [ ] Run comparison to identify remaining divergence points
+  - [ ] Validate on standard benchmarks (MMLU, HellaSwag, etc.)
+  - [ ] Test edge cases (empty input, max length, special tokens)
+  
+  **Current Status**: Model generates text but output is nonsensical. Example outputs:
+  - "The capital of France is" → "Closes Est Est Closes employ employ estimatelientais employ"
+  - "Once upon a time" → "Closes Closes Closes Est Survey Est EstXYais T"
+  
+  **Identified Issues**:
+  - Model produces repeated, nonsensical words
+  - Top predictions include unrelated tokens like "rear", "utility", "profit" for "Paris"
+  - Model might have weight loading or tokenizer vocabulary mapping issues
+  
+- **Performance Benchmarking**
+  - [ ] Create comprehensive benchmark suite
+  - [ ] Compare inference speed across different batch sizes
+  - [ ] Memory usage profiling and comparison
+  - [ ] Latency measurements for real-time applications
+  
 - **Documentation**
-  - [ ] API documentation
-  - [ ] Architecture overview
-  - [ ] Usage examples
-  - [ ] Performance analysis
+  - [ ] API reference with examples
+  - [ ] Migration guide from HuggingFace transformers
+  - [ ] Performance tuning guide
+  - [ ] Deployment best practices
+  
+- **Integration Examples**
+  - [ ] REST API server example
+  - [ ] Streaming generation example
+  - [ ] Multi-GPU inference setup
+  - [ ] Fine-tuning example
+
+### Phase 6: Production Features (Week 9) - New
+- **Advanced Generation**
+  - [ ] Implement beam search
+  - [ ] Add constrained generation (JSON, grammar)
+  - [ ] Support for guided generation
+  - [ ] Implement speculative decoding
+  
+- **Model Optimization**
+  - [ ] Add quantization support (GPTQ, AWQ)
+  - [ ] Implement model sharding for multi-GPU
+  - [ ] Support for model pruning
+  - [ ] ONNX export capability
+  
+- **Serving Infrastructure**
+  - [ ] Implement request batching
+  - [ ] Add metrics and monitoring
+  - [ ] Create health check endpoints
+  - [ ] Support for model hot-swapping
+  
+- **Error Handling**
+  - [ ] Graceful OOM handling
+  - [ ] Timeout mechanisms
+  - [ ] Input validation and sanitization
+  - [ ] Recovery from GPU errors
 
 ## Testing Infrastructure ✅ COMPLETED
 - Dual backend testing configured:
@@ -209,7 +272,7 @@ We follow **Test-Driven Development (TDD)** principles:
 - Environment configured with PyTorch libtorch for ROCm support
 - TDD approach enforced: tests written before implementation
 
-## Current Status: Phase 4 - Inference & Generation
+## Current Status: Phase 5 - Validation & Documentation (Debugging Non-Coherent Text)
 
 ## Overview
 
@@ -223,12 +286,13 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
 
 ## Timeline Summary (Revised)
 - **Phase 1**: Core Components (Weeks 1-4) - Extended from 1-2 weeks
-- **Phase 1.5**: Performance Optimization (Week 4) - New phase
+- **Phase 1.5**: Performance Optimization (Week 4-5) - Critical path
 - **Phase 2**: Model Assembly (Week 5) - Now with simplified model first
 - **Phase 3**: Full Model & Weight Loading (Week 6)
 - **Phase 4**: Inference & Generation (Week 7)
-- **Phase 5**: Validation & Documentation (Week 8) - New phase
-- **Total**: 8 weeks (up from original 6 weeks)
+- **Phase 5**: Validation & Documentation (Week 8) - Essential
+- **Phase 6**: Production Features (Week 9) - New phase
+- **Total**: 9 weeks (up from original 6 weeks)
 
 ## Completed Components
 
@@ -239,13 +303,15 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - RMSNorm layer normalization
   - KV-cache support
 
-### 2. Mamba State Space Module (`src/model/mamba.rs`) ✅
-- `GraniteMoeHybridMambaLayer` with:
+### 2. Mamba State Space Module (`src/model/mamba_fixed.rs`) ✅
+- `GraniteMoeHybridMambaFixed` with:
   - SSM parameters (A, B, C, D matrices)
   - Time step (∆) computation
   - State evolution logic
-  - Selective scan algorithm
+  - Selective scan algorithm (fixed)
   - Gated MLP with SiLU activation
+  - Fixed x_proj layer implementation
+  - Fixed state update equation order
 
 ### 3. Mixture of Experts (`src/model/moe.rs`) ✅
 - `GraniteMoeHybridRouter` with:
@@ -280,20 +346,22 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
   - Forward pass implementation
   - Configuration-based initialization
 
-## Next Steps: Weight Loading
+## Next Steps: Debug Text Generation
 
-### Weight Conversion (`src/loader.rs`)
-- Load HuggingFace weights from Hub
-- Convert to Burn tensor format
-- Handle BF16 precision
-- Map parameter names correctly
+### Text Generation Issues
+- Model generates text but it's nonsensical
+- Need to investigate:
+  - Weight loading correctness
+  - Tokenizer vocabulary mapping
+  - Attention layer functioning
+  - Layer-by-layer output comparison with HuggingFace
 
 ## Technical Challenges & Solutions
 
 ### 1. Mamba Implementation ✅ COMPLETED
-- **Challenge**: Selective scan algorithm efficiency
-- **Solution**: Started with basic implementation, optimization deferred
-- **Result**: Working implementation on both backends
+- **Challenge**: Selective scan algorithm value explosion
+- **Solution**: Fixed matrix multiplication order (delta * B instead of delta * x * B)
+- **Result**: Stable outputs without value explosion
 
 ### 2. MoE Routing ✅ COMPLETED
 - **Challenge**: Load balancing across 62 experts with 6 active per token
@@ -310,6 +378,11 @@ The IBM Granite 4.0 Tiny Preview is a hybrid architecture combining:
 - **Solution**: Use tensor operations instead of scalar comparisons
 - **Result**: Code works on both CPU and GPU backends
 
+### 5. Text Generation Quality ⚠️ IN PROGRESS
+- **Challenge**: Model outputs nonsensical text
+- **Solution**: Need to debug weight loading, tokenizer, and layer outputs
+- **Result**: Model generates tokens but not coherent text
+
 ## Directory Structure
 ```
 granite-4-burn/
@@ -317,33 +390,63 @@ granite-4-burn/
 │   ├── model/
 │   │   ├── attention.rs ✅
 │   │   ├── mamba.rs ✅
+│   │   ├── mamba_fixed.rs ✅
+│   │   ├── mamba_selective_scan_fixed.rs ✅
 │   │   ├── moe.rs ✅
 │   │   ├── components.rs ✅
 │   │   ├── block.rs ✅
 │   │   ├── config.rs ✅
-│   │   ├── model.rs ⏳
-│   │   └── mod.rs ✅
-│   ├── loader.rs ⏳
-│   ├── pretrained.rs ⏳
-│   ├── tokenizer.rs ⏳
-│   ├── cache.rs ⏳
-│   ├── sampling.rs ⏳
-│   └── lib.rs ⏳
+│   │   ├── model.rs ✅
+│   │   ├── mod.rs ✅
+│   │   ├── cache.rs          # KV and state caching
+│   │   └── quantization.rs   # Quantization support
+│   ├── generation/
+│   │   ├── mod.rs
+│   │   ├── beam_search.rs
+│   │   ├── constrained.rs
+│   │   └── sampling.rs
+│   ├── serving/
+│   │   ├── mod.rs
+│   │   ├── batch_manager.rs
+│   │   └── request_handler.rs
+│   ├── optimization/
+│   │   ├── mod.rs
+│   │   ├── flash_attention.rs
+│   │   └── kernel_fusion.rs
+│   ├── loader.rs ✅
+│   ├── generation.rs ✅
+│   ├── tokenizer.rs ✅
+│   └── lib.rs ✅
 ├── examples/
-│   ├── chat.rs ⏳
-│   ├── completion.rs ⏳
-│   └── benchmark.rs ⏳
-└── tests/
-    └── integration_tests.rs ⏳
+│   ├── chat.rs ✅
+│   ├── text_completion.rs ✅
+│   ├── test_generation_fixed.rs ✅
+│   ├── test_simple_tokens.rs ✅
+│   └── benchmark.rs
+├── tests/
+│   └── integration_tests.rs
+├── benches/
+│   ├── inference.rs
+│   ├── memory.rs
+│   └── throughput.rs
+└── integration_tests/
+    ├── parity_test.rs
+    └── end_to_end.rs
 ```
 
 ## Dependencies
-Current dependencies in `Cargo.toml`:
+Updated dependencies in `Cargo.toml`:
 ```toml
 [dependencies]
-burn = { version = "0.17.0", features = ["ndarray"] }
+burn = { version = "0.17.0", features = ["ndarray", "fusion"] }
 burn-tch = { version = "0.17.0", optional = true }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokenizers = "0.21.1"
+safetensors = "0.4"
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }  # For async serving
+metrics = "0.24"  # For monitoring
 
 [features]
 default = ["ndarray"]
@@ -353,13 +456,8 @@ ndarray = ["burn/ndarray", "burn/autodiff"]
 [dev-dependencies]
 burn = { version = "0.17.0", features = ["tch", "autodiff"] }
 burn-tch = { version = "0.17.0" }
-```
-
-Still to be added:
-```toml
-hf-hub = "0.3"  # For downloading weights
-tokenizers = "0.20"  # HuggingFace tokenizer
-safetensors = "0.4"  # Weight format
+criterion = "0.5"  # For benchmarking
+proptest = "1.0"   # For property testing
 ```
 
 ## Key Model Parameters
@@ -376,6 +474,41 @@ safetensors = "0.4"  # Weight format
 - Context window: 131,072 tokens (128k)
 - Intermediate size: 512
 - Layer pattern: 5M, 1A, 9M, 1A, 9M, 1A, 9M, 1A, 4M
+
+## Testing Strategy
+
+### Unit Tests
+- Component-level tests for each module
+- Property-based testing for tensor operations
+- Fuzz testing for tokenizer edge cases
+
+### Integration Tests
+- End-to-end generation tests
+- Multi-model interaction tests
+- Performance regression tests
+
+### Validation Tests
+- Numerical accuracy vs HuggingFace
+- Benchmark score comparison
+- Memory usage validation
+
+### Stress Tests
+- Long sequence handling (128k tokens)
+- Concurrent request handling
+- OOM behavior testing
+
+## Success Criteria ✅
+- [x] Model loads HuggingFace weights successfully
+- [x] Text generation produces output
+- [x] All 586 weights loaded properly
+- [x] Tokenizer works with 49,160 tokens
+- [x] Full 40-layer model runs on GPU
+- [ ] Text generation produces coherent output
+- [ ] Inference speed within 90% of HuggingFace
+- [ ] Memory usage within 110% of HuggingFace  
+- [ ] Numerical accuracy >99.9% vs reference
+- [ ] Support for batch sizes up to 32
+- [ ] Successful deployment in production environment
 
 ## References
 - HuggingFace Model: https://huggingface.co/ibm-granite/granite-4.0-tiny-preview

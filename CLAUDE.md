@@ -101,3 +101,9 @@ Common feature flags across models:
 ### Current Branch
 
 Working on branch `71-granite-4` for implementing Granite 4 model support.
+
+### Reference Documentation
+
+Burn user documentation: https://burn.dev/burn-book/print.html
+
+Burn API documentation: https://burn.dev/docs/burn/all.html

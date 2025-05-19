@@ -73,7 +73,7 @@ where
         &mut self,
         mut input_ids: Tensor<B, 2, Int>,
         config: &GenerationConfig,
-        special_tokens: &SpecialTokens,
+        _special_tokens: &SpecialTokens,
     ) -> Result<Vec<u32>, Box<dyn std::error::Error>> {
         let mut generated_tokens = vec![];
         
