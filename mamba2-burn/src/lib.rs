@@ -12,6 +12,8 @@ mod block;
 mod model;
 mod loader;
 mod ssm_utils;
+pub mod utils;
+mod debug_utils;
 
 // Re-export main types
 pub use cache::Mamba2Cache;
@@ -30,5 +32,6 @@ pub mod prelude {
         Mamba2ForCausalLM,
         Mamba2Cache,
         load_mamba2_weights,
+        utils::{auto_device, get_device},
     };
 }

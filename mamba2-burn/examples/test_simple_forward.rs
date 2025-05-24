@@ -1,4 +1,5 @@
 use mamba2_burn::{load_mamba2_weights};
+use mamba2_burn::prelude::auto_device;
 use burn::prelude::*;
 use burn_tch::{LibTorch, LibTorchDevice};
 use tokenizers::Tokenizer;
@@ -14,8 +15,8 @@ fn main() {
     let tokenizer = Tokenizer::from_file(&tokenizer_path)
         .expect("Failed to load tokenizer");
     
-    // Create device
-    let device = LibTorchDevice::Cuda(0);
+    // Create device - automatically detect GPU or fallback to CPU
+    let device = auto_device();
     
     // Load model and weights
     let (config, model) = load_mamba2_weights::<Backend>(&model_path, &device)

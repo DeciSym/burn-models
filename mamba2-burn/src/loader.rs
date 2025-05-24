@@ -253,7 +253,14 @@ fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
     bytes.chunks_exact(4)
         .map(|chunk| {
             let arr: [u8; 4] = chunk.try_into().unwrap();
-            f32::from_le_bytes(arr)
+            let value = f32::from_le_bytes(arr);
+            // Check for invalid values and replace with zeros
+            if value.is_nan() || value.is_infinite() {
+                println!("WARNING: Found NaN or Inf in weight loading, replacing with 0.0");
+                0.0
+            } else {
+                value
+            }
         })
         .collect()
 }

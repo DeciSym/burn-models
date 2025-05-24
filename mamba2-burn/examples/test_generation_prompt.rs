@@ -1,14 +1,15 @@
 use burn::prelude::*;
 use burn::backend::LibTorch;
 use mamba2_burn::{load_mamba2_weights, Mamba2Cache};
+use mamba2_burn::prelude::auto_device;
 use tokenizers::Tokenizer;
 use std::path::Path;
 
 type Backend = LibTorch<f32>;
 
 fn main() {
-    // Set device
-    let device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
+    // Set device - automatically detect GPU or fallback to CPU
+    let device = auto_device();
     println!("Using device: {:?}", device);
     
     // Path to the mamba2-130m model

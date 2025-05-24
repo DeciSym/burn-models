@@ -1,13 +1,14 @@
 use burn::prelude::*;
 use burn_tch::{LibTorch, LibTorchDevice};
 use mamba2_burn::load_mamba2_weights;
+use mamba2_burn::prelude::auto_device;
 use std::path::Path;
 
 type Backend = LibTorch<f32>;
 
 fn main() -> anyhow::Result<()> {
-    // Set up device
-    let device = LibTorchDevice::Cuda(0);
+    // Set up device - automatically detect GPU or fallback to CPU
+    let device = auto_device();
     
     // Path to the HuggingFace model
     let model_path = Path::new("/home/aac/.cache/huggingface/hub/models--AntonV--mamba2-130m-hf/snapshots/05e8773fc4ac1cd067e8a18a5c45372ce5178405");

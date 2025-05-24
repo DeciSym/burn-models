@@ -8,7 +8,7 @@ use std::path::Path;
 type Backend = LibTorch;
 
 fn main() -> Result<()> {
-    // Set device - automatically detect GPU or fallback to CPU
+    // Set device
     let device = auto_device();
     println!("Using device: {:?}", device);
     
@@ -53,14 +53,14 @@ fn main() -> Result<()> {
     let (config, model) = load_mamba2_weights::<Backend>(&snapshot_path, &device)?;
     
     println!("\nModel configuration:");
-    println!("  vocab_size: {}", config.vocab_size);
-    println!("  d_model: {}", config.d_model);
-    println!("  n_layer: {}", config.n_layer);
-    println!("  n_heads: {}", config.n_heads);
-    println!("  d_state: {}", config.d_state);
+    println!("  vocab_size: {}", config.vocab_size.unwrap_or(0));
+    println!("  d_model: {}", config.hidden_size);
+    println!("  n_layer: {}", config.num_hidden_layers);
+    println!("  n_heads: {}", config.num_heads);
+    println!("  d_state: {}", config.state_size);
     
     // Prepare input
-    let prompt = "The capital of France is";
+    let prompt = "Hey how are you doing?";
     println!("\nPrompt: '{}'", prompt);
     
     // Tokenize
@@ -79,13 +79,14 @@ fn main() -> Result<()> {
     ).reshape([batch_size, seq_len]);
     
     println!("\nGenerating text...");
-    let max_new_tokens = 20;
-    let temperature = 0.8;
+    let max_new_tokens = 10;
+    let temperature = 0.7;
     
-    // Generate
+    // Generate using the model's generate method
+    let max_length = seq_len + max_new_tokens;
     let output_tensor = model.generate(
         input_tensor,
-        input_ids.len() + max_new_tokens,
+        max_length,
         temperature,
         &config,
         &device
@@ -99,12 +100,20 @@ fn main() -> Result<()> {
         .map(|id| id as u32)
         .collect();
     
-    println!("\nOutput tokens: {:?}", output_tokens);
+    println!("\nGenerated tokens: {:?}", output_tokens);
     
-    // Decode
+    // Decode the full sequence
     let decoded = tokenizer.decode(&output_tokens, true)
         .map_err(|e| anyhow::anyhow!("Failed to decode: {:?}", e))?;
+    
     println!("\nGenerated text: '{}'", decoded);
+    
+    // Show just the new tokens
+    let new_tokens = &output_tokens[input_ids.len()..];
+    let new_text = tokenizer.decode(new_tokens, true)
+        .map_err(|e| anyhow::anyhow!("Failed to decode new tokens: {:?}", e))?;
+    
+    println!("New tokens only: '{}'", new_text);
     
     Ok(())
 }

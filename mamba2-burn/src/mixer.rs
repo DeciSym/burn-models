@@ -283,16 +283,19 @@ impl<B: Backend> Mamba2Mixer<B> {
         let pad_size = (self.chunk_size - seq_len % self.chunk_size) % self.chunk_size;
         
         // Get D parameter and compute D residual
-        // D has shape [num_heads], we need to add one dimension to make it [num_heads, 1]
-        // Then it will broadcast correctly with x_padded [batch, seq_len, num_heads, head_dim]
-        let d = self.d_param.val().clone().unsqueeze_dim(1); // Shape: [num_heads, 1]
+        // D has shape [num_heads], we need to expand it to match x_padded dimensions
+        // x_padded has shape [batch, seq_len, num_heads, head_dim]
         let x_padded = crate::ssm_utils::pad_tensor_by_size_4d(x.clone(), pad_size);
+        let d = self.d_param.val().clone()
+            .unsqueeze_dims(&[0, 1, 3])  // Shape: [1, 1, num_heads, 1]
+            .repeat(&[batch_size, x_padded.dims()[1], 1, self.head_dim]); // Shape: [batch, seq_len_padded, num_heads, head_dim]
         let d_residual = d * x_padded;
         
         // Discretize x and A
         let dt_expanded = dt.clone().reshape([batch_size, seq_len, self.n_heads, 1]);
         let x = x * dt_expanded;
         
+        // Compute A values with numerical stability
         let a = -self.a_log.val().exp();
         // dt has shape [batch_size, seq_len, n_heads], a has shape [n_heads]
         // We need to broadcast a to match dt's shape
@@ -328,7 +331,9 @@ impl<B: Backend> Mamba2Mixer<B> {
         }
         
         // 1. Compute the output for each intra-chunk (diagonal blocks)
-        let l = crate::ssm_utils::segment_sum_matrix(a).exp();
+        // Clamp before exp to prevent overflow
+        let segment_sum = crate::ssm_utils::segment_sum_matrix(a);
+        let l = segment_sum.clamp(-50.0, 50.0).exp();
         
         // Contraction of C and B to get G (attention-weights like)
         // C: [batch, num_chunks, chunk_size, num_heads, state_size]
@@ -353,14 +358,16 @@ impl<B: Backend> Mamba2Mixer<B> {
         // 2. Compute the state for each intra-chunk
         // a_cumsum has shape [batch, num_heads, num_chunks, chunk_size]
         // We want to get the last element of each chunk (last in chunk_size dimension)
-        let a_cumsum_dims = a_cumsum.dims();
+        let _a_cumsum_dims = a_cumsum.dims();
         
         let a_cumsum_last = a_cumsum.clone().slice([0..batch_size, 0..heads, 0..n_chunks, (chunk_sz-1)..chunk_sz]);
         
         // a_cumsum_last already has shape [batch, num_heads, num_chunks, 1]
         // a_cumsum has shape [batch, num_heads, num_chunks, chunk_size]
         // The subtraction will broadcast correctly
-        let decay_states = (a_cumsum_last - a_cumsum.clone()).exp();
+        // Clamp before exp to prevent overflow
+        let decay_arg = (a_cumsum_last - a_cumsum.clone()).clamp(-50.0, 50.0);
+        let decay_states = decay_arg.exp();
         let decay_states_permuted = decay_states.swap_dims(1, 2).swap_dims(2, 3);
         
         // B: [batch, num_chunks, chunk_size, num_heads, state_size]
@@ -468,9 +475,10 @@ impl<B: Backend> Mamba2Mixer<B> {
             .reshape([num_chunks_padded, num_chunks_padded])
             .unsqueeze_dims(&[0, 1]);
         
-        let neg_inf = Tensor::full([batch_size, heads, num_chunks_padded, num_chunks_padded], f32::NEG_INFINITY, &device);
-        let decay_chunk = cumsum * final_mask.clone() + neg_inf * (Tensor::ones_like(&final_mask) - final_mask);
-        let decay_chunk = decay_chunk.exp();
+        // Use large negative value instead of NEG_INFINITY to avoid NaN in exp()
+        let neg_large = Tensor::full([batch_size, heads, num_chunks_padded, num_chunks_padded], -1e10f32, &device);
+        let decay_chunk = cumsum * final_mask.clone() + neg_large * (Tensor::ones_like(&final_mask) - final_mask);
+        let decay_chunk = decay_chunk.clamp(-50.0, 50.0).exp();
         let decay_chunk = decay_chunk.swap_dims(1, 3);
         
         // Now decay_chunk has shape [batch, num_chunks_padded, num_chunks_padded, heads]
@@ -490,7 +498,8 @@ impl<B: Backend> Mamba2Mixer<B> {
             .squeeze(1);
         
         // 4. Compute state -> output conversion per chunk
-        let state_decay_out = a_cumsum.exp();
+        // Clamp before exp to prevent overflow
+        let state_decay_out = a_cumsum.clamp(-50.0, 50.0).exp();
         
         // C: [batch, num_chunks, chunk_size, num_heads, state_size]
         // states: [batch, num_chunks, num_heads, head_dim, state_size]

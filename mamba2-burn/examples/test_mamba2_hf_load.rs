@@ -2,6 +2,7 @@ use anyhow::Result;
 use burn::prelude::*;
 use burn::backend::LibTorch;
 use mamba2_burn::{load_mamba2_weights};
+use mamba2_burn::prelude::auto_device;
 use tokenizers::Tokenizer;
 use std::path::Path;
 
@@ -9,7 +10,7 @@ type Backend = LibTorch;
 
 fn main() -> Result<()> {
     // Set device
-    let device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
+    let device = auto_device();
     println!("Using device: {:?}", device);
     
     // Model name on HuggingFace

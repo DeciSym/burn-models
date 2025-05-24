@@ -2,12 +2,13 @@ use anyhow::Result;
 use burn::prelude::*;
 use burn::backend::LibTorch;
 use mamba2_burn::{Mamba2Config, Mamba2ForCausalLM};
+use mamba2_burn::prelude::auto_device;
 
 type Backend = LibTorch;
 
 fn main() -> Result<()> {
-    // Set device
-    let device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
+    // Set device - automatically detect GPU or fallback to CPU
+    let device = auto_device();
     println!("Using device: {:?}", device);
     
     // Create a simple config for testing

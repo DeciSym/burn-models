@@ -2,17 +2,15 @@ use anyhow::Result;
 use burn::prelude::*;
 use burn::backend::LibTorch;
 use mamba2_burn::{Mamba2ForCausalLM, Mamba2Config, Mamba2Cache};
+use mamba2_burn::prelude::auto_device;
 use tokenizers::Tokenizer;
 use std::path::Path;
 
 type Backend = LibTorch<f32>;
 
 fn main() -> Result<()> {
-    // Set device
-    #[cfg(feature = "tch-gpu")]
-    let device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
-    #[cfg(feature = "tch-cpu")]
-    let device = burn::backend::libtorch::LibTorchDevice::Cpu;
+    // Set device - automatically detect GPU or fallback to CPU
+    let device = auto_device();
     
     println!("Using device: {:?}", device);
     

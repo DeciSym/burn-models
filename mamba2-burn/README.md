@@ -14,6 +14,7 @@ Mamba2 is a state-space model (SSM) architecture that provides an efficient alte
 - Efficient state-space model (SSM) operations
 - Generation/inference support with caching
 - Multiple backend support (WGPU, Torch, CUDA)
+- Automatic CPU fallback when GPU is not available
 
 ## Usage
 
@@ -27,13 +28,14 @@ mamba2-burn = "0.1.0"
 ### Loading a Pre-trained Model
 
 ```rust
-use mamba2_burn::{Mamba2Config, Mamba2ForCausalLM, load_mamba2_weights};
-use burn::backend::Wgpu;
+use mamba2_burn::prelude::*;
+use burn::backend::LibTorch;
 
-type Backend = Wgpu;
+type Backend = LibTorch;
 
 fn main() -> anyhow::Result<()> {
-    let device = Default::default();
+    // Automatically detect GPU or fallback to CPU
+    let device = auto_device();
     let model_path = "path/to/huggingface/model";
     
     // Load model and config from HuggingFace format

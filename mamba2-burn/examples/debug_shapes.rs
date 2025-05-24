@@ -1,12 +1,12 @@
 use burn::prelude::*;
 use burn::backend::LibTorch;
 use mamba2_burn::{Mamba2Config, Mamba2Model, Mamba2Cache};
-use std::path::Path;
+use mamba2_burn::prelude::auto_device;
 
 type Backend = LibTorch<f32>;
 
 fn main() {
-    let device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
+    let device = auto_device();
     
     // Create a minimal config
     let config = Mamba2Config {
@@ -17,14 +17,14 @@ fn main() {
         chunk_size: 256,
         conv_kernel: 4,
         state_size: 128,
-        time_step_rank: Some(256),
+        time_step_rank: 256,
         vocab_size: Some(50288),
-        head_dim: 64,
+        head_dim: Some(64),
         n_groups: 1,
         ..Default::default()
     };
     
-    println!("Config: hidden_size={}, expand={}, num_heads={}, head_dim={}", 
+    println!("Config: hidden_size={}, expand={}, num_heads={}, head_dim={:?}", 
         config.hidden_size, config.expand, config.num_heads, config.head_dim);
     println!("d_inner = {} * {} = {}", config.hidden_size, config.expand, config.expand * config.hidden_size);
     
@@ -54,6 +54,6 @@ fn main() {
     
     // Try forward pass
     println!("\nRunning forward pass...");
-    let output = model.model.forward(input_tensor, Some(&mut cache), &config);
+    let output = model.forward(input_tensor, Some(&mut cache), &config);
     println!("Output shape: {:?}", output.dims());
 }

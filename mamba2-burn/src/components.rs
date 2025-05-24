@@ -22,12 +22,15 @@ impl<B: Backend> RMSNorm<B> {
     
     /// Forward pass
     pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
-        // Compute RMS
+        // Compute RMS using rsqrt for numerical stability
         let variance = x.clone().powf_scalar(2.0).mean_dim(2);
-        let rms = (variance + self.eps).sqrt();
+        // Use reciprocal square root for better numerical stability
+        // Add clamp to prevent extreme values
+        let variance_safe = variance.clamp_min(1e-8);
+        let inv_rms = (variance_safe + self.eps).powf_scalar(-0.5);
         
         // Normalize and scale
-        let normalized = x / rms;
+        let normalized = x * inv_rms;
         let weight_expanded = self.weight.val().unsqueeze_dims(&[0, 1]);
         normalized * weight_expanded
     }
@@ -61,12 +64,15 @@ impl<B: Backend> RMSNormGated<B> {
             hidden_states = hidden_states * silu(gate);
         }
         
-        // Compute RMS norm
+        // Compute RMS norm using rsqrt for numerical stability
         let variance = hidden_states.clone().powf_scalar(2.0).mean_dim(2);
-        let rms = (variance + self.eps).sqrt();
+        // Use reciprocal square root for better numerical stability
+        // Add clamp to prevent extreme values
+        let variance_safe = variance.clamp_min(1e-8);
+        let inv_rms = (variance_safe + self.eps).powf_scalar(-0.5);
         
         // Normalize and scale
-        let normalized = hidden_states / rms;
+        let normalized = hidden_states * inv_rms;
         let weight_expanded = self.weight.val().unsqueeze_dims(&[0, 1]);
         normalized * weight_expanded
     }

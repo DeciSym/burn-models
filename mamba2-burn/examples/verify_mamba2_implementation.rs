@@ -10,7 +10,7 @@ type Backend = LibTorch;
 
 fn main() -> Result<()> {
     // Set device
-    let device = burn::backend::libtorch::LibTorchDevice::Cuda(0);
+    let device = auto_device();
     println!("Using device: {:?}", device);
     
     // Model name on HuggingFace

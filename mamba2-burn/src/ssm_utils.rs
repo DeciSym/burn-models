@@ -129,12 +129,12 @@ pub fn segment_sum_matrix<B: Backend>(input_tensor: Tensor<B, 4>) -> Tensor<B, 5
     let final_mask = Tensor::<B, 1>::from_data(final_mask_data.as_slice(), &device)
         .reshape([chunk_size, chunk_size]);
     
-    // Create neg_inf tensor
-    let neg_inf = Tensor::full([batch, n_heads, n_chunks, chunk_size, chunk_size], f32::NEG_INFINITY, &device);
+    // Use a large negative value instead of NEG_INFINITY to avoid NaN propagation
+    let neg_large = Tensor::full([batch, n_heads, n_chunks, chunk_size, chunk_size], -1e10f32, &device);
     
-    // Apply final mask: where mask is 1, keep cumsum value; where 0, use -inf
+    // Apply final mask: where mask is 1, keep cumsum value; where 0, use large negative value
     let final_mask_expanded = final_mask.unsqueeze_dims(&[0, 1, 2]);
-    let result = cumsum * final_mask_expanded.clone() + neg_inf * (Tensor::ones_like(&final_mask_expanded) - final_mask_expanded);
+    let result = cumsum * final_mask_expanded.clone() + neg_large * (Tensor::ones_like(&final_mask_expanded) - final_mask_expanded);
     
     result
 }

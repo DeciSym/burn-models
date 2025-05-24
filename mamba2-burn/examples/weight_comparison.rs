@@ -1,6 +1,7 @@
 use burn::prelude::*;
 use burn_tch::{TchBackend, TchDevice};
 use mamba2_burn::{load_mamba2_weights, Mamba2Config, Mamba2ForCausalLM};
+use mamba2_burn::prelude::auto_device;
 use std::path::Path;
 use std::collections::HashMap;
 
@@ -9,8 +10,14 @@ type Backend = TchBackend<f32>;
 fn main() -> anyhow::Result<()> {
     println!("=== Mamba2 Weight Comparison Test ===\n");
     
-    // Set up device
-    let device = TchDevice::Cuda(0);
+    // Set up device - note: auto_device returns LibTorchDevice, convert to TchDevice
+    let device = if tch::Cuda::is_available() {
+        println!("CUDA is available, using GPU");
+        TchDevice::Cuda(0)
+    } else {
+        println!("CUDA not available, using CPU");
+        TchDevice::Cpu
+    };
     
     // Path to the HuggingFace model
     let model_path = Path::new("/home/aac/.cache/huggingface/hub/models--AntonV--mamba2-130m-hf/snapshots/05e8773fc4ac1cd067e8a18a5c45372ce5178405");
