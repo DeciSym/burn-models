@@ -138,7 +138,7 @@ impl<B: Backend> Mamba2Mixer<B> {
     pub fn forward(
         &self,
         hidden_states: Tensor<B, 3>,
-        cache: Option<&mut Mamba2Cache<B>>,
+        mut cache: Option<&mut Mamba2Cache<B>>,
         layer_idx: usize,
     ) -> Tensor<B, 3> {
         let [batch_size, seq_len, _] = hidden_states.dims();
@@ -176,16 +176,30 @@ impl<B: Backend> Mamba2Mixer<B> {
             (None, None, gate, conv_input, dt)
         };
         
+        
         // Apply activation 
         let activation = get_activation(&self.hidden_act);
         
         // Apply convolution
-        let conv_out = if seq_len == 1 {
-            // Generation mode - single token - for now use training convolution
-            self.apply_conv_training(hidden_states_b_c)
+        let conv_out = if cache.is_some() && seq_len == 1 {
+            // Generation mode - single token with cache
+            self.apply_conv_generation(hidden_states_b_c, cache.as_deref_mut(), layer_idx)
         } else {
-            // Training mode - full sequence
-            self.apply_conv_training(hidden_states_b_c)
+            // Training mode - full sequence (also initializes cache if present)
+            let conv_out = self.apply_conv_training(hidden_states_b_c.clone());
+            
+            // If cache is present and this is a prompt, initialize conv cache
+            if let Some(cache) = cache.as_deref_mut() {
+                if cache.seqlen_offset == 0 {
+                    // Initialize conv cache with the last d_conv tokens
+                    let start_idx = seq_len.saturating_sub(self.d_conv);
+                    let conv_init = hidden_states_b_c.slice([0..batch_size, start_idx..seq_len, 0..self.conv_dim]);
+                    // Transpose to [batch, conv_dim, d_conv]
+                    cache.conv_states[layer_idx] = conv_init.swap_dims(1, 2);
+                }
+            }
+            
+            conv_out
         };
         
         // Split conv output into x and B, C components
@@ -243,12 +257,74 @@ impl<B: Backend> Mamba2Mixer<B> {
     fn apply_conv_generation(
         &self,
         x: Tensor<B, 3>,
-        _cache: Option<&mut Mamba2Cache<B>>,
-        _layer_idx: usize,
+        cache: Option<&mut Mamba2Cache<B>>,
+        layer_idx: usize,
     ) -> Tensor<B, 3> {
-        // For single token generation, we need to use the conv cache
-        // This is a simplified implementation - actual would use causal_conv1d_update
-        self.apply_conv_training(x)
+        let [batch_size, seq_len, _conv_dim] = x.dims();
+        assert_eq!(seq_len, 1, "Generation convolution expects single token");
+        
+        let cache = cache.expect("Cache required for generation");
+        let device = x.device();
+        
+        // Get conv state for this layer
+        let conv_state = &mut cache.conv_states[layer_idx];
+        
+        // Update conv state: shift left and append new token
+        // conv_state shape: [batch, d_inner, d_conv]
+        // Shift left by 1 position
+        let shifted = if self.d_conv > 1 {
+            conv_state.clone().slice([0..batch_size, 0..self.conv_dim, 1..self.d_conv])
+        } else {
+            Tensor::zeros([batch_size, self.conv_dim, 0], &device)
+        };
+        
+        // Append new token
+        // x has shape [batch, 1, conv_dim], need to transpose to [batch, conv_dim, 1]
+        let x_transposed = x.swap_dims(1, 2); // [batch, conv_dim, 1]
+        let new_conv_state = if self.d_conv > 1 {
+            Tensor::cat(vec![shifted, x_transposed.clone()], 2)
+        } else {
+            x_transposed.clone()
+        };
+        
+        // Update cache
+        *conv_state = new_conv_state.clone();
+        
+        // Apply convolution using the cached states
+        // conv1d weight shape: [out_channels, in_channels/groups, kernel_size]
+        // For depthwise conv with groups=conv_dim, weight shape: [conv_dim, 1, d_conv]
+        let weight = self.conv1d.weight.val();
+        let bias = self.conv1d.bias.as_ref().map(|b| b.val());
+        
+        // Compute convolution manually
+        // For depthwise conv, weight has shape [conv_dim, 1, d_conv]
+        // Squeeze out the middle dimension to get [conv_dim, d_conv]
+        let weight_reshaped = weight.squeeze::<2>(1);
+        
+        // Multiply and sum: [batch, conv_dim, d_conv] * [conv_dim, d_conv] -> [batch, conv_dim]
+        let weight_expanded = weight_reshaped.unsqueeze_dim(0);
+        let conv_mul = new_conv_state * weight_expanded;
+        let conv_out = conv_mul.sum_dim(2);
+        
+        // Add bias if present
+        // conv_out shape: [batch, conv_dim, 1] - need to squeeze last dim
+        // bias shape: [conv_dim]
+        let conv_out = conv_out.squeeze::<2>(2);
+        
+        let conv_out = if let Some(b) = bias {
+            // Ensure bias is properly broadcast
+            conv_out + b.clone().unsqueeze_dim(0)
+        } else {
+            conv_out
+        };
+        
+        // Apply activation and transpose back
+        // conv_out: [batch, conv_dim] -> [batch, 1, conv_dim]
+        let activation = get_activation(&self.hidden_act);
+        let conv_out = conv_out.unsqueeze_dim(1);
+        let conv_out = activation(conv_out);
+        
+        conv_out
     }
     
     /// Apply SSM for training (full sequence) using chunk-based parallel scan
@@ -282,10 +358,12 @@ impl<B: Backend> Mamba2Mixer<B> {
         // Calculate padding for chunks
         let pad_size = (self.chunk_size - seq_len % self.chunk_size) % self.chunk_size;
         
-        // Get D parameter and compute D residual
-        // D has shape [num_heads], we need to expand it to match x_padded dimensions
-        // x_padded has shape [batch, seq_len, num_heads, head_dim]
-        let x_padded = crate::ssm_utils::pad_tensor_by_size_4d(x.clone(), pad_size);
+        // Get D parameter and compute D residual using x (SSM input)
+        // D has shape [num_heads], we need to expand it to match x dimensions
+        // First reshape x to [batch, seq_len, num_heads, head_dim]
+        let x_for_d = x.clone();
+        let x_reshaped = x_for_d.reshape([batch_size, seq_len, self.n_heads, self.head_dim]);
+        let x_padded = crate::ssm_utils::pad_tensor_by_size_4d(x_reshaped, pad_size);
         let d = self.d_param.val().clone()
             .unsqueeze_dims(&[0, 1, 3])  // Shape: [1, 1, num_heads, 1]
             .repeat(&[batch_size, x_padded.dims()[1], 1, self.head_dim]); // Shape: [batch, seq_len_padded, num_heads, head_dim]

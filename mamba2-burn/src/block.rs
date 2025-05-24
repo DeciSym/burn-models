@@ -36,12 +36,12 @@ impl<B: Backend> Mamba2Block<B> {
     pub fn forward(
         &self,
         hidden_states: Tensor<B, 3>,
-        residual: Option<Tensor<B, 3>>,
+        _residual: Option<Tensor<B, 3>>,  // Not used - each block manages its own residual
         cache: Option<&mut Mamba2Cache<B>>,
         layer_idx: usize,
     ) -> (Tensor<B, 3>, Tensor<B, 3>) {
-        // Handle residual connection
-        let residual = residual.unwrap_or_else(|| hidden_states.clone());
+        // Save input as residual (pre-norm residual pattern)
+        let residual = hidden_states.clone();
         
         // Apply layer norm
         let hidden_states = self.norm.forward(hidden_states);
@@ -54,9 +54,9 @@ impl<B: Backend> Mamba2Block<B> {
             // Cast to f32 for residual if needed (simplified here)
             hidden_states + residual.clone()
         } else {
-            hidden_states + residual.clone()
+            hidden_states + residual
         };
         
-        (output, residual)
+        (output.clone(), output)  // Return output twice for compatibility
     }
 }

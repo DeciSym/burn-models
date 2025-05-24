@@ -126,9 +126,10 @@ impl<B: Backend> Mamba2Model<B> {
             batch_size,
             config.num_hidden_layers,
             config.conv_kernel,
-            config.expand * config.hidden_size,
-            config.state_size,
             config.num_heads,
+            config.head_dim.unwrap_or(64),
+            config.state_size,
+            config.n_groups,
             device,
         );
         

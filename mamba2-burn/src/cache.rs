@@ -19,19 +19,22 @@ impl<B: Backend> Mamba2Cache<B> {
         batch_size: usize,
         n_layers: usize,
         d_conv: usize,
-        d_inner: usize,
-        d_state: usize,
         n_heads: usize,
+        head_dim: usize,
+        d_state: usize,
+        n_groups: usize,
         device: &B::Device,
     ) -> Self {
         let mut conv_states = Vec::with_capacity(n_layers);
         let mut ssm_states = Vec::with_capacity(n_layers);
         
-        let head_dim = d_inner / n_heads;
+        // Calculate dimensions
+        let d_inner = n_heads * head_dim;
+        let conv_dim = d_inner + 2 * n_groups * d_state;
         
         for _ in 0..n_layers {
-            // Conv state: [batch, d_inner, d_conv]
-            conv_states.push(Tensor::zeros([batch_size, d_inner, d_conv], device));
+            // Conv state: [batch, conv_dim, d_conv]
+            conv_states.push(Tensor::zeros([batch_size, conv_dim, d_conv], device));
             
             // SSM state: [batch, n_heads, head_dim * d_state]
             ssm_states.push(Tensor::zeros([batch_size, n_heads, head_dim * d_state], device));
