@@ -410,7 +410,8 @@ impl<B: Backend> Mamba2Mixer<B> {
         
         // 1. Compute the output for each intra-chunk (diagonal blocks)
         // Clamp before exp to prevent overflow
-        let segment_sum = crate::ssm_utils::segment_sum_matrix(a);
+        // Use patched version with better numerical constants
+        let segment_sum = crate::segment_sum_stable::segment_sum_pytorch_style(a);
         let l = segment_sum.clamp(B::FloatElem::from_elem(-50.0), B::FloatElem::from_elem(50.0)).exp();
         
         // Contraction of C and B to get G (attention-weights like)
@@ -554,7 +555,8 @@ impl<B: Backend> Mamba2Mixer<B> {
             .unsqueeze_dims(&[0, 1]);
         
         // Use large negative value instead of NEG_INFINITY to avoid NaN in exp()
-        let neg_large = Tensor::full([batch_size, heads, num_chunks_padded, num_chunks_padded], B::FloatElem::from_elem(-1e10), &device);
+        // Use -1e30 which is closer to -inf than -1e10
+        let neg_large = Tensor::full([batch_size, heads, num_chunks_padded, num_chunks_padded], B::FloatElem::from_elem(-1e30), &device);
         let decay_chunk = cumsum * final_mask.clone() + neg_large * (Tensor::ones_like(&final_mask) - final_mask);
         let decay_chunk = decay_chunk.clamp(B::FloatElem::from_elem(-50.0), B::FloatElem::from_elem(50.0)).exp();
         let decay_chunk = decay_chunk.swap_dims(1, 3);

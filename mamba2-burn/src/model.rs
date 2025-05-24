@@ -80,16 +80,12 @@ impl<B: Backend> Mamba2Model<B> {
         let mut hidden_states = self.embeddings.forward(input_ids);
         
         // Pass through layers
-        let mut residual = None;
         for (layer_idx, layer) in self.layers.iter().enumerate() {
-            let (new_hidden_states, new_residual) = layer.forward(
+            hidden_states = layer.forward(
                 hidden_states,
-                residual,
                 cache.as_deref_mut(),
                 layer_idx,
             );
-            hidden_states = new_hidden_states;
-            residual = Some(new_residual);
         }
         
         // Final normalization

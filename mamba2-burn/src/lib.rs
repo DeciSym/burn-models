@@ -12,6 +12,11 @@ mod block;
 mod model;
 mod loader;
 mod ssm_utils;
+mod ssm_utils_patch;
+// mod ssm_utils_v2;
+// mod cumsum;
+mod cumsum_stable;
+mod segment_sum_stable;
 pub mod utils;
 mod debug_utils;
 

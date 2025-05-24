@@ -36,10 +36,9 @@ impl<B: Backend> Mamba2Block<B> {
     pub fn forward(
         &self,
         hidden_states: Tensor<B, 3>,
-        _residual: Option<Tensor<B, 3>>,  // Not used - each block manages its own residual
         cache: Option<&mut Mamba2Cache<B>>,
         layer_idx: usize,
-    ) -> (Tensor<B, 3>, Tensor<B, 3>) {
+    ) -> Tensor<B, 3> {
         // Save input as residual (pre-norm residual pattern)
         let residual = hidden_states.clone();
         
@@ -50,10 +49,6 @@ impl<B: Backend> Mamba2Block<B> {
         let hidden_states = self.mixer.forward(hidden_states, cache, layer_idx);
         
         // Add residual
-        let output = hidden_states + residual;
-        
-        // For compatibility with the model.rs which expects a tuple,
-        // return output as both values
-        (output.clone(), output)
+        hidden_states + residual
     }
 }
