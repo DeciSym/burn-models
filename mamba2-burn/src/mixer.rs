@@ -93,7 +93,7 @@ impl<B: Backend> Mamba2Mixer<B> {
         
         // Initialize A parameter (log values)
         let a_values = (1..=n_heads)
-            .map(|i| (i as f32).ln())
+            .map(|i| B::FloatElem::from_elem((i as f64).ln()))
             .collect::<Vec<_>>();
         let a_log = Tensor::from_data(a_values.as_slice(), device);
         
@@ -343,7 +343,7 @@ impl<B: Backend> Mamba2Mixer<B> {
         // Apply dt_bias and softplus
         let dt = dt + self.dt_bias.val().clone().unsqueeze_dims(&[0, 1]);
         let dt = burn::tensor::activation::softplus(dt, 1.0);
-        let dt = dt.clamp(self.time_step_min, self.time_step_max);
+        let dt = dt.clamp(B::FloatElem::from_elem(self.time_step_min), B::FloatElem::from_elem(self.time_step_max));
         
         // Reshape tensors for heads
         let x = x.reshape([batch_size, seq_len, self.n_heads, self.head_dim]);
@@ -411,7 +411,7 @@ impl<B: Backend> Mamba2Mixer<B> {
         // 1. Compute the output for each intra-chunk (diagonal blocks)
         // Clamp before exp to prevent overflow
         let segment_sum = crate::ssm_utils::segment_sum_matrix(a);
-        let l = segment_sum.clamp(-50.0, 50.0).exp();
+        let l = segment_sum.clamp(B::FloatElem::from_elem(-50.0), B::FloatElem::from_elem(50.0)).exp();
         
         // Contraction of C and B to get G (attention-weights like)
         // C: [batch, num_chunks, chunk_size, num_heads, state_size]
@@ -444,7 +444,7 @@ impl<B: Backend> Mamba2Mixer<B> {
         // a_cumsum has shape [batch, num_heads, num_chunks, chunk_size]
         // The subtraction will broadcast correctly
         // Clamp before exp to prevent overflow
-        let decay_arg = (a_cumsum_last - a_cumsum.clone()).clamp(-50.0, 50.0);
+        let decay_arg = (a_cumsum_last - a_cumsum.clone()).clamp(B::FloatElem::from_elem(-50.0), B::FloatElem::from_elem(50.0));
         let decay_states = decay_arg.exp();
         let decay_states_permuted = decay_states.swap_dims(1, 2).swap_dims(2, 3);
         
@@ -511,11 +511,11 @@ impl<B: Backend> Mamba2Mixer<B> {
         let input_expanded = input_expanded.repeat(&[1, 1, 1, num_chunks_padded]);
         
         // Create lower triangular mask for segment sum
-        let mut mask_data = vec![0.0f32; num_chunks_padded * num_chunks_padded];
+        let mut mask_data = vec![B::FloatElem::from_elem(0.0); num_chunks_padded * num_chunks_padded];
         for i in 0..num_chunks_padded {
             for j in 0..num_chunks_padded {
                 if j < i {
-                    mask_data[i * num_chunks_padded + j] = 1.0;
+                    mask_data[i * num_chunks_padded + j] = B::FloatElem::from_elem(1.0);
                 }
             }
         }
@@ -541,11 +541,11 @@ impl<B: Backend> Mamba2Mixer<B> {
         }
         
         // Apply final mask (diagonal included)
-        let mut final_mask_data = vec![0.0f32; num_chunks_padded * num_chunks_padded];
+        let mut final_mask_data = vec![B::FloatElem::from_elem(0.0); num_chunks_padded * num_chunks_padded];
         for i in 0..num_chunks_padded {
             for j in 0..num_chunks_padded {
                 if j <= i {
-                    final_mask_data[i * num_chunks_padded + j] = 1.0;
+                    final_mask_data[i * num_chunks_padded + j] = B::FloatElem::from_elem(1.0);
                 }
             }
         }
@@ -554,9 +554,9 @@ impl<B: Backend> Mamba2Mixer<B> {
             .unsqueeze_dims(&[0, 1]);
         
         // Use large negative value instead of NEG_INFINITY to avoid NaN in exp()
-        let neg_large = Tensor::full([batch_size, heads, num_chunks_padded, num_chunks_padded], -1e10f32, &device);
+        let neg_large = Tensor::full([batch_size, heads, num_chunks_padded, num_chunks_padded], B::FloatElem::from_elem(-1e10), &device);
         let decay_chunk = cumsum * final_mask.clone() + neg_large * (Tensor::ones_like(&final_mask) - final_mask);
-        let decay_chunk = decay_chunk.clamp(-50.0, 50.0).exp();
+        let decay_chunk = decay_chunk.clamp(B::FloatElem::from_elem(-50.0), B::FloatElem::from_elem(50.0)).exp();
         let decay_chunk = decay_chunk.swap_dims(1, 3);
         
         // Now decay_chunk has shape [batch, num_chunks_padded, num_chunks_padded, heads]
@@ -577,7 +577,7 @@ impl<B: Backend> Mamba2Mixer<B> {
         
         // 4. Compute state -> output conversion per chunk
         // Clamp before exp to prevent overflow
-        let state_decay_out = a_cumsum.clamp(-50.0, 50.0).exp();
+        let state_decay_out = a_cumsum.clamp(B::FloatElem::from_elem(-50.0), B::FloatElem::from_elem(50.0)).exp();
         
         // C: [batch, num_chunks, chunk_size, num_heads, state_size]
         // states: [batch, num_chunks, num_heads, head_dim, state_size]
@@ -644,7 +644,7 @@ impl<B: Backend> Mamba2Mixer<B> {
         // Apply dt_bias and softplus
         let dt = dt + self.dt_bias.val().clone().unsqueeze_dim(0);
         let dt = burn::tensor::activation::softplus(dt, 1.0);
-        let dt = dt.clamp(self.time_step_min, self.time_step_max);
+        let dt = dt.clamp(B::FloatElem::from_elem(self.time_step_min), B::FloatElem::from_elem(self.time_step_max));
         
         // Reshape for heads
         let x = x.reshape([batch_size, self.n_heads, self.head_dim]);

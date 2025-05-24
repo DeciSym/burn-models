@@ -115,7 +115,7 @@ impl<B: Backend> Mamba2Model<B> {
         &self,
         input_ids: Tensor<B, 2, Int>,
         max_length: usize,
-        temperature: f32,
+        temperature: B::FloatElem,
         config: &Mamba2Config,
         device: &B::Device,
     ) -> Tensor<B, 2, Int> {
@@ -224,7 +224,7 @@ impl<B: Backend> Mamba2ForCausalLM<B> {
         &self,
         input_ids: Tensor<B, 2, Int>,
         max_length: usize,
-        temperature: f32,
+        temperature: B::FloatElem,
         config: &Mamba2Config,
         device: &B::Device,
     ) -> Tensor<B, 2, Int> {

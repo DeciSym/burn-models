@@ -64,6 +64,13 @@ cargo run --release --features pretrained --example inference samples/dog_bike_m
 --features ndarray
 ```
 
+Note that compared to other frameworks, Burn has a very different
+approach to supporting many backends. By design, most code is generic
+over the Backend trait, which allows us to build Burn with swappable
+backends. Verify that the Rust implementation is generic over the
+tensor precision and that the Backend is the only place that the
+precision is specified and used.
+
 ## Architecture
 
 This repository contains multiple independent Burn model implementations, each in its own package:

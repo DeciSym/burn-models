@@ -80,11 +80,11 @@ pub fn segment_sum_matrix<B: Backend>(input_tensor: Tensor<B, 4>) -> Tensor<B, 5
     let input_expanded = input_expanded.repeat(&[1, 1, 1, 1, chunk_size]);
     
     // Create lower triangular mask (excluding diagonal)
-    let mut mask_data = vec![0.0f32; chunk_size * chunk_size];
+    let mut mask_data = vec![B::FloatElem::from_elem(0.0); chunk_size * chunk_size];
     for i in 0..chunk_size {
         for j in 0..chunk_size {
             if j < i {
-                mask_data[i * chunk_size + j] = 1.0;
+                mask_data[i * chunk_size + j] = B::FloatElem::from_elem(1.0);
             }
         }
     }
@@ -117,11 +117,11 @@ pub fn segment_sum_matrix<B: Backend>(input_tensor: Tensor<B, 4>) -> Tensor<B, 5
     }
     
     // Create mask including diagonal for final result
-    let mut final_mask_data = vec![0.0f32; chunk_size * chunk_size];
+    let mut final_mask_data = vec![B::FloatElem::from_elem(0.0); chunk_size * chunk_size];
     for i in 0..chunk_size {
         for j in 0..chunk_size {
             if j <= i {
-                final_mask_data[i * chunk_size + j] = 1.0;
+                final_mask_data[i * chunk_size + j] = B::FloatElem::from_elem(1.0);
             }
         }
     }
@@ -130,7 +130,7 @@ pub fn segment_sum_matrix<B: Backend>(input_tensor: Tensor<B, 4>) -> Tensor<B, 5
         .reshape([chunk_size, chunk_size]);
     
     // Use a large negative value instead of NEG_INFINITY to avoid NaN propagation
-    let neg_large = Tensor::full([batch, n_heads, n_chunks, chunk_size, chunk_size], -1e10f32, &device);
+    let neg_large = Tensor::full([batch, n_heads, n_chunks, chunk_size, chunk_size], B::FloatElem::from_elem(-1e10), &device);
     
     // Apply final mask: where mask is 1, keep cumsum value; where 0, use large negative value
     let final_mask_expanded = final_mask.unsqueeze_dims(&[0, 1, 2]);

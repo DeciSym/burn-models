@@ -50,13 +50,10 @@ impl<B: Backend> Mamba2Block<B> {
         let hidden_states = self.mixer.forward(hidden_states, cache, layer_idx);
         
         // Add residual
-        let output = if self.residual_in_fp32 {
-            // Cast to f32 for residual if needed (simplified here)
-            hidden_states + residual.clone()
-        } else {
-            hidden_states + residual
-        };
+        let output = hidden_states + residual;
         
-        (output.clone(), output)  // Return output twice for compatibility
+        // For compatibility with the model.rs which expects a tuple,
+        // return output as both values
+        (output.clone(), output)
     }
 }

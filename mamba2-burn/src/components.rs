@@ -23,11 +23,11 @@ impl<B: Backend> RMSNorm<B> {
     /// Forward pass
     pub fn forward(&self, x: Tensor<B, 3>) -> Tensor<B, 3> {
         // Compute RMS using rsqrt for numerical stability
-        let variance = x.clone().powf_scalar(2.0).mean_dim(2);
+        let variance = x.clone().powf_scalar(B::FloatElem::from_elem(2.0)).mean_dim(2);
         // Use reciprocal square root for better numerical stability
         // Add clamp to prevent extreme values
-        let variance_safe = variance.clamp_min(1e-8);
-        let inv_rms = (variance_safe + self.eps).powf_scalar(-0.5);
+        let variance_safe = variance.clamp_min(B::FloatElem::from_elem(1e-8));
+        let inv_rms = (variance_safe + B::FloatElem::from_elem(self.eps)).powf_scalar(B::FloatElem::from_elem(-0.5));
         
         // Normalize and scale
         let normalized = x * inv_rms;
@@ -65,11 +65,11 @@ impl<B: Backend> RMSNormGated<B> {
         }
         
         // Compute RMS norm using rsqrt for numerical stability
-        let variance = hidden_states.clone().powf_scalar(2.0).mean_dim(2);
+        let variance = hidden_states.clone().powf_scalar(B::FloatElem::from_elem(2.0)).mean_dim(2);
         // Use reciprocal square root for better numerical stability
         // Add clamp to prevent extreme values
-        let variance_safe = variance.clamp_min(1e-8);
-        let inv_rms = (variance_safe + self.eps).powf_scalar(-0.5);
+        let variance_safe = variance.clamp_min(B::FloatElem::from_elem(1e-8));
+        let inv_rms = (variance_safe + B::FloatElem::from_elem(self.eps)).powf_scalar(B::FloatElem::from_elem(-0.5));
         
         // Normalize and scale
         let normalized = hidden_states * inv_rms;
@@ -121,8 +121,8 @@ impl<B: Backend> RMSNormGroups<B> {
         
         if self.n_groups == 1 {
             // Standard RMS norm
-            let variance = x.clone().powf_scalar(2.0).mean_dim(2);
-            let rms = (variance + self.eps).sqrt();
+            let variance = x.clone().powf_scalar(B::FloatElem::from_elem(2.0)).mean_dim(2);
+            let rms = (variance + B::FloatElem::from_elem(self.eps)).sqrt();
             let normalized = x / rms;
             
             let weight_expanded = self.weight.val().unsqueeze_dims(&[0, 1]);
@@ -142,8 +142,8 @@ impl<B: Backend> RMSNormGroups<B> {
             let x_grouped = x.reshape([batch, seq_len, self.n_groups, group_size]);
             
             // Compute RMS per group
-            let variance = x_grouped.clone().powf_scalar(2.0).mean_dim(3);
-            let rms = (variance + self.eps).sqrt();
+            let variance = x_grouped.clone().powf_scalar(B::FloatElem::from_elem(2.0)).mean_dim(3);
+            let rms = (variance + B::FloatElem::from_elem(self.eps)).sqrt();
             let normalized = x_grouped / rms.unsqueeze_dim(3);
             
             // Reshape back
