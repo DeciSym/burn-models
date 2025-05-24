@@ -1,3 +1,4 @@
+*.npy
 *~
 src/bin/
-*.md~
+venv/

@@ -50,6 +50,21 @@ impl<B: Backend> GraniteMoeHybridRouter<B> {
         &mut self.router
     }
     
+    /// Provides immutable access to the router linear layer
+    pub fn router(&self) -> &Linear<B> {
+        &self.router
+    }
+    
+    /// Returns the number of experts
+    pub fn num_experts(&self) -> usize {
+        self.num_experts
+    }
+    
+    /// Returns the number of selected experts per token
+    pub fn num_selected_experts(&self) -> usize {
+        self.num_selected_experts
+    }
+    
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> RouterOutput<B> {
         let [batch_size, seq_len, hidden_size] = hidden_states.dims();
         let _device = hidden_states.device();

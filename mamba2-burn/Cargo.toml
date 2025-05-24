@@ -1,0 +1,32 @@
+[package]
+name = "mamba2-burn"
+version = "0.1.0"
+edition = "2021"
+authors = ["Burn Contributors"]
+license = "MIT OR Apache-2.0"
+description = "Mamba2 implementation for the Burn deep learning framework"
+repository = "https://github.com/tracel-ai/burn-models"
+readme = "README.md"
+keywords = ["mamba2", "deep-learning", "burn", "state-space-model", "ssm"]
+categories = ["science"]
+
+[dependencies]
+burn = { version = "0.17.0", features = ["std"] }
+burn-tensor = { version = "0.17.0", features = ["std"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+tokenizers = { version = "0.15", default-features = false, features = ["onig"] }
+safetensors = "0.4"
+
+[dev-dependencies]
+burn = { version = "0.17.0", features = ["train", "tch", "vision"] }
+burn-tch = { version = "0.17.0" }
+
+[features]
+default = []
+std = ["burn/std"]
+tch-gpu = ["burn/tch"]
+tch-cpu = ["burn/tch"]
+wgpu = ["burn/wgpu"]
+cuda = ["burn/cuda"]

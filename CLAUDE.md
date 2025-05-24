@@ -1,6 +1,7 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when
+working with code in this repository.
 
 ## Commands
 
@@ -89,6 +90,11 @@ Models typically follow this pattern:
 3. Load pre-trained weights (if available)
 4. Run inference
 
+Linear weights in HuggingFace are stored in a different format than
+Burn expects. In PyTorch/HuggingFace, linear weights are typically
+[out_features, in_features], while Burn expects [in_features,
+out_features].
+
 ### Feature Flags
 
 Common feature flags across models:
@@ -102,8 +108,43 @@ Common feature flags across models:
 
 Working on branch `71-granite-4` for implementing Granite 4 model support.
 
+### Workflow
+
+- Loading all of the model weights for all layers into the GPU takes
+  at least three minutes. Allow all tests and debugging runs to
+  execute for at least five minutes.
+- Ensure all Rust code compiles without any errors or warnings when
+  you're done making a series of code changes.
+- Prefer running single tests, and not the whole test suite, for
+  performance.
+- Prefer the tch-gpu Burn Backend for testing and debugging so that
+  the GPU is used for performance.
+- Use a test-driven development (TDD) methodology.
+- Read the granite-4-burn/IMPLEMENTATION_PLAN.md to plan work. Update
+  the plan after each step.
+- For the granite-4-burn model, the model has been trained. The model
+  resources from HuggingFace Hub are authoratative and known to
+  work. The implementation of the forward pass in the Python
+  transformers library is authoratative. The goal of this Rust
+  implementation is to function as a port of the transformers library
+  into Rust using the Burn crate.
+- Use the Python virtual environment at granite-4-burn/venv to run and
+  test Python codes. It is already configured to support CUDA devices
+  for GPU acceleration with PyTorch.
+- Treat warnings from the Rust compiler as errors and ensure each
+  warning is resolved before proceeding. Understand the intent of the
+  code and verify that the warning does not indicate a failure to
+  achive the intent.
+
 ### Reference Documentation
 
 Burn user documentation: https://burn.dev/burn-book/print.html
 
 Burn API documentation: https://burn.dev/docs/burn/all.html
+
+The source code for the Python transformers library is available
+locally at /home/aac/src/transformers.
+
+The HuggingFace Hub model files for the
+ibm-granite/granite-4.0-tiny-preview model are available locally at
+/home/aac/.cache/huggingface/hub/models--ibm-granite--granite-4.0-tiny-preview/snapshots/9bbe26b647d49e1cc50612f30e8ab2b0920631f2.

@@ -64,7 +64,7 @@ pub struct GraniteMoeHybridConfig {
     pub initializer_range: f64,
 
     // The epsilon used by the rms normalization layers.
-    #[config(default = 0.000001)]
+    #[config(default = 0.00001)]
     pub rms_norm_eps: f64,
 
     // Whether or not the model should return the last key/values
@@ -233,7 +233,7 @@ impl Default for GraniteMoeHybridConfig {
             hidden_act: "silu".to_string(),
             tie_word_embeddings: false,
             initializer_range: 0.02,
-            rms_norm_eps: 1e-6,
+            rms_norm_eps: 1e-5, // Standardized to match Python implementation
             use_cache: true,
             pad_token_id: None,
             bos_token_id: 1,
@@ -275,6 +275,34 @@ impl GraniteMoeHybridConfig {
             None => vec!["mamba".to_string(); self.num_hidden_layers],
         }
     }
+    
+    // Return the head dimension for attention heads
+    pub fn head_dim(&self) -> usize {
+        self.hidden_size / self.num_attention_heads
+    }
+    
+    // Return the mamba intermediate size
+    pub fn mamba_intermediate_size(&self) -> usize {
+        self.mamba_expand * self.hidden_size
+    }
+    
+    // Return the expert intermediate size
+    pub fn expert_intermediate_size(&self) -> usize {
+        self.intermediate_size / 4
+    }
+    
+    // Return the number of experts in the model
+    pub fn num_experts(&self) -> usize {
+        self.num_local_experts
+    }
+    
+    // Calculate mamba head dimensions
+    pub fn get_mamba_d_head(&self) -> usize {
+        match self.mamba_d_head {
+            MambaDHead::Auto => self.mamba_intermediate_size() / self.mamba_n_heads,
+            MambaDHead::Size(size) => size,
+        }
+    }
 
     pub fn validate(&self) -> Result<(), String> {
         // Validate layer types
@@ -287,16 +315,13 @@ impl GraniteMoeHybridConfig {
         }
 
         // Validate mamba dimensions
-        let mamba_intermediate = self.mamba_expand * self.hidden_size;
+        let mamba_intermediate = self.mamba_intermediate_size();
         if mamba_intermediate % self.mamba_n_heads != 0 {
             return Err("mamba_n_heads must divide mamba_expand * hidden_size".to_string());
         }
 
         // Validate mamba head dimensions
-        let mamba_d_head = match self.mamba_d_head {
-            MambaDHead::Auto => mamba_intermediate / self.mamba_n_heads,
-            MambaDHead::Size(size) => size,
-        };
+        let mamba_d_head = self.get_mamba_d_head();
 
         if mamba_d_head * self.mamba_n_heads != mamba_intermediate {
             return Err("The dimensions for the Mamba head state do not match the model intermediate_size".to_string());

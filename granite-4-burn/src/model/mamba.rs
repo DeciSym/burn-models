@@ -32,13 +32,16 @@ impl GraniteMoeHybridMambaConfig {
         
         // Input projection to expand hidden size
         let dt_out_channels = self.mamba_n_heads; // 48 in Granite-4
-        let in_proj_size = mamba_intermediate * 2 + dt_out_channels;
+        // HuggingFace: projection_size = intermediate_size + conv_dim + num_heads
+        // where conv_dim = intermediate_size + 2 * n_groups * ssm_state_size
+        let conv_dim = mamba_intermediate + 2 * self.mamba_d_state; // 3072 + 2*128 = 3328
+        let in_proj_size = mamba_intermediate + conv_dim + dt_out_channels; // 3072 + 3328 + 48 = 6448
         let in_proj = LinearConfig::new(self.hidden_size, in_proj_size)
             .with_bias(self.mamba_proj_bias)
             .init(device);
         
-        // 1D convolution
-        let conv_channels = mamba_intermediate + dt_out_channels;
+        // 1D convolution - should match conv_dim from HuggingFace
+        let conv_channels = conv_dim; // 3328 to match weight shape
         let conv1d = Conv1dConfig::new(conv_channels, conv_channels, self.mamba_d_conv)
             .with_padding(PaddingConfig1d::Explicit(self.mamba_d_conv - 1))  // Causal padding
             .with_bias(self.mamba_conv_bias)
@@ -63,15 +66,20 @@ impl GraniteMoeHybridMambaConfig {
             .with_bias(self.mamba_proj_bias)
             .init(device);
         
-        // State space parameters
-        let dt_bias = Tensor::zeros([mamba_intermediate], device);
-        let a_log = Tensor::ones([mamba_intermediate], device).mul_scalar(-5.0); // Initialize with negative values
-        let d_param = Tensor::ones([mamba_intermediate], device);
+        // State space parameters - all should match num_heads (48), not intermediate size (3072)
+        let dt_bias = Tensor::ones([dt_out_channels], device); // [48] - initialized to ones like HF
+        // Initialize A_log based on HuggingFace: A = torch.arange(1, num_heads + 1), then log(A)
+        let a_values = Tensor::arange(1..(dt_out_channels as i64 + 1), device)
+            .float()
+            .reshape([dt_out_channels]);
+        let a_log = a_values.log(); // [48] - proper initialization
+        let d_param = Tensor::ones([dt_out_channels], device); // [48]
         
         // Normalization layer
+        // Get epsilon from config to standardize across all RMSNorms
         let norm = GraniteMoeHybridRMSNormConfig {
             dim: mamba_intermediate,
-            eps: 1e-5,
+            eps: 1e-5, // Standardized to match Python implementation
         }.init(device);
         
         GraniteMoeHybridMamba {
@@ -132,62 +140,53 @@ pub struct GraniteMoeHybridMamba<B: Backend> {
 impl<B: Backend> GraniteMoeHybridMamba<B> {
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
         let [batch_size, seq_len, _] = hidden_states.dims();
-        let _device = hidden_states.device();
         
-        // Input projection: expand to intermediate*2 + dt_out_channels
-        let proj_states = self.in_proj.forward(hidden_states);
+        // 1. Input projection: projects to intermediate_size + conv_dim + num_heads
+        let projected_states = self.in_proj.forward(hidden_states);
         
-        // Split into conv input, gate, and delta time projection  
-        let mamba_intermediate = self.mamba_expand * self.hidden_size;
-        let conv_input = proj_states.clone().slice([0..batch_size, 0..seq_len, 0..mamba_intermediate]);
-        let gate = proj_states.clone().slice([0..batch_size, 0..seq_len, mamba_intermediate..2*mamba_intermediate]);
-        let dt_proj = proj_states.slice([0..batch_size, 0..seq_len, 2*mamba_intermediate..2*mamba_intermediate+self.dt_out_channels]);
+        // 2. Split projection output according to HuggingFace implementation
+        let intermediate_size = self.mamba_expand * self.hidden_size; // 3072
+        let conv_dim = intermediate_size + 2 * self.mamba_d_state; // 3072 + 2*128 = 3328
+        let total_projection = intermediate_size + conv_dim + self.mamba_n_heads; // 3072 + 3328 + 48 = 6448
         
-        // Combine conv_input and dt for convolution
-        let conv_states = Tensor::cat(vec![conv_input, dt_proj.clone()], 2);
+        // Verify projection size matches weight dimensions
+        let [_, _, proj_size] = projected_states.dims();
+        assert_eq!(proj_size, total_projection, "Projection size mismatch: expected {}, got {}", total_projection, proj_size);
         
-        // Apply 1D convolution (causal)
-        // Convert from [batch, seq, channels] to [batch, channels, seq] for conv1d
-        let conv_states = conv_states.swap_dims(1, 2);
-        let conv_states = self.conv1d.forward(conv_states);
-        // Convert back to [batch, seq, channels]
-        let conv_states = conv_states.swap_dims(1, 2);
+        // Split: [gate, hidden_states_B_C, dt]
+        let gate = projected_states.clone().slice([0..batch_size, 0..seq_len, 0..intermediate_size]);
+        let hidden_states_b_c = projected_states.clone().slice([0..batch_size, 0..seq_len, intermediate_size..intermediate_size + conv_dim]);
+        let dt = projected_states.slice([0..batch_size, 0..seq_len, intermediate_size + conv_dim..total_projection]);
         
-        // Slice to remove right padding (causal convolution)
-        let [_, conv_seq_len, _] = conv_states.dims();
-        let conv_states = if conv_seq_len > seq_len {
-            conv_states.slice([0..batch_size, 0..seq_len, 0..mamba_intermediate + self.dt_out_channels])
+        // 3. Convolution on hidden_states_B_C
+        // Convert to [batch, channels, seq] for conv1d
+        let hidden_states_b_c = hidden_states_b_c.swap_dims(1, 2);
+        let hidden_states_b_c = self.conv1d.forward(hidden_states_b_c);
+        // Convert back to [batch, seq, channels] and apply SiLU activation
+        let hidden_states_b_c = hidden_states_b_c.swap_dims(1, 2);
+        let hidden_states_b_c = hidden_states_b_c.clone() * activation::sigmoid(hidden_states_b_c);
+        
+        // Slice to remove padding from causal convolution
+        let [_, conv_seq_len, _] = hidden_states_b_c.dims();
+        let hidden_states_b_c = if conv_seq_len > seq_len {
+            hidden_states_b_c.slice([0..batch_size, 0..seq_len, 0..conv_dim])
         } else {
-            conv_states
+            hidden_states_b_c
         };
         
-        // Split convolution output
-        let x_conv = conv_states.clone().slice([0..batch_size, 0..seq_len, 0..mamba_intermediate]);
-        let _dt_conv = conv_states.slice([0..batch_size, 0..seq_len, mamba_intermediate..mamba_intermediate + self.dt_out_channels]);
+        // 4. Split conv output into [hidden_states, B, C]
+        let hidden_states = hidden_states_b_c.clone().slice([0..batch_size, 0..seq_len, 0..intermediate_size]);
+        let b_matrix = hidden_states_b_c.clone().slice([0..batch_size, 0..seq_len, intermediate_size..intermediate_size + self.mamba_d_state]);
+        let c_matrix = hidden_states_b_c.slice([0..batch_size, 0..seq_len, intermediate_size + self.mamba_d_state..intermediate_size + 2 * self.mamba_d_state]);
         
-        // Apply SiLU activation to main path
-        let x_conv = x_conv.clone() * activation::sigmoid(x_conv);
+        // 5. Process delta (time step) with bias and softplus
+        let dt_bias_reshaped = self.dt_bias.clone().reshape([1, 1, self.mamba_n_heads]);
+        let delta = (dt + dt_bias_reshaped).exp().add_scalar(1.0).log(); // softplus
+        let delta = delta.clamp(1e-6, 10.0); // numerical stability
         
-        // Apply normalization
-        let x_norm = self.norm.forward(x_conv);
-        
-        // Use x_proj to compute parameters for SSM
-        let x_proj_out = self.x_proj.forward(x_norm.clone());
-        
-        // Split x_proj output into dt_params, B, and C
-        let dt_params = x_proj_out.clone().slice([0..batch_size, 0..seq_len, 0..self.dt_rank]);
-        let b_matrix = x_proj_out.clone().slice([0..batch_size, 0..seq_len, self.dt_rank..self.dt_rank+self.mamba_d_state]);
-        let c_matrix = x_proj_out.slice([0..batch_size, 0..seq_len, self.dt_rank+self.mamba_d_state..self.dt_rank+2*self.mamba_d_state]);
-        
-        // Process time deltas
-        let delta = self.dt_proj.forward(dt_params);
-        // Reshape dt_bias to match delta dimensions
-        let dt_bias_reshaped = self.dt_bias.clone().reshape([1, 1, self.mamba_expand * self.hidden_size]);
-        let delta = (delta + dt_bias_reshaped).exp();
-        
-        // Apply selective scan using the SelectiveScan module with computed B and C
-        let ssm_states = SelectiveScan::forward(
-            x_norm,
+        // 6. Apply selective scan
+        let scan_output = SelectiveScan::forward(
+            hidden_states,
             delta,
             self.a_log.clone(),
             b_matrix,
@@ -195,11 +194,11 @@ impl<B: Backend> GraniteMoeHybridMamba<B> {
             self.d_param.clone(),
         );
         
-        // Combine with gate
-        let gated_states = ssm_states * activation::sigmoid(gate);
+        // 7. Apply gated normalization (multiply gate and apply normalization)
+        let scan_output = self.norm.forward_gated(scan_output, gate);
         
-        // Output projection back to hidden_size
-        let output = self.out_proj.forward(gated_states);
+        // 8. Final output projection
+        let output = self.out_proj.forward(scan_output);
         
         output
     }

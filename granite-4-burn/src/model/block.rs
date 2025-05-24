@@ -7,7 +7,8 @@ use burn::{
 use super::{
     attention::{GraniteMoeHybridAttention, GraniteMoeHybridAttentionConfig},
     components::{GraniteMoeHybridRMSNorm, GraniteMoeHybridRMSNormConfig},
-    mamba::{GraniteMoeHybridMamba, GraniteMoeHybridMambaConfig},
+    mamba::{GraniteMoeHybridMambaConfig},
+    mamba_v2::{MambaV2, MambaV2Config},
     shared_mlp::{SharedMLP, SharedMLPConfig},
     block_sparse_moe::{BlockSparseMoE, BlockSparseMoEConfig},
 };
@@ -37,18 +38,33 @@ pub struct GraniteMoeHybridBlockConfig {
 impl GraniteMoeHybridBlockConfig {
     pub fn init<B: Backend>(&self, device: &B::Device) -> GraniteMoeHybridBlock<B> {
         // Initialize layer based on type
-        let (layer, self_attn, mamba) = match self.layer_type.as_str() {
+        let (layer, self_attn) = match self.layer_type.as_str() {
             "attention" => {
                 let attention_config = self.attention_config.as_ref()
                     .expect("attention_config must be provided for attention layers");
                 let attention = attention_config.init(device);
-                (BlockLayer::Attention(attention.clone()), Some(attention), None)
+                (BlockLayer::Attention(attention.clone()), Some(attention))
             },
             "mamba" => {
                 let mamba_config = self.mamba_config.as_ref()
                     .expect("mamba_config must be provided for mamba layers");
-                let mamba = mamba_config.init(device);
-                (BlockLayer::Mamba(mamba.clone()), None, Some(mamba))
+                
+                // Convert to MambaV2Config
+                let mamba_v2_config = MambaV2Config {
+                    hidden_size: mamba_config.hidden_size,
+                    num_heads: mamba_config.mamba_n_heads,
+                    ssm_state_size: mamba_config.mamba_d_state,
+                    conv_kernel_size: mamba_config.mamba_d_conv,
+                    expand_factor: mamba_config.mamba_expand,
+                    n_groups: 1, // From config.json: mamba_n_groups = 1
+                    head_dim: mamba_config.mamba_d_head,
+                    conv_bias: mamba_config.mamba_conv_bias,
+                    proj_bias: mamba_config.mamba_proj_bias,
+                    rms_norm_eps: self.layer_norm_eps,
+                };
+                
+                let mamba_v2 = mamba_v2_config.init(device);
+                (BlockLayer::MambaV2(mamba_v2), None)
             },
             _ => panic!("layer_type must be either 'attention' or 'mamba'"),
         };
@@ -79,7 +95,6 @@ impl GraniteMoeHybridBlockConfig {
             shared_mlp,
             post_attention_layernorm,
             self_attn,
-            mamba,
             residual_multiplier: self.residual_multiplier,
         }
     }
@@ -88,7 +103,7 @@ impl GraniteMoeHybridBlockConfig {
 #[derive(Module, Debug)]
 pub enum BlockLayer<B: Backend> {
     Attention(GraniteMoeHybridAttention<B>),
-    Mamba(GraniteMoeHybridMamba<B>),
+    MambaV2(MambaV2<B>),
 }
 
 #[derive(Module, Debug)]
@@ -99,7 +114,6 @@ pub struct GraniteMoeHybridBlock<B: Backend> {
     pub shared_mlp: Option<SharedMLP<B>>,
     pub post_attention_layernorm: GraniteMoeHybridRMSNorm<B>,
     pub self_attn: Option<GraniteMoeHybridAttention<B>>,
-    pub mamba: Option<GraniteMoeHybridMamba<B>>,
     pub residual_multiplier: f32,
 }
 
@@ -118,8 +132,8 @@ impl<B: Backend> GraniteMoeHybridBlock<B> {
                 let (output, _cache) = attention.forward(hidden_states, None, None);
                 output
             },
-            BlockLayer::Mamba(mamba) => {
-                mamba.forward(hidden_states)
+            BlockLayer::MambaV2(mamba_v2) => {
+                mamba_v2.forward(hidden_states)
             },
         };
         

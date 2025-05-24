@@ -30,14 +30,38 @@ pub struct GraniteMoeHybridRMSNorm<B: Backend> {
 
 impl<B: Backend> GraniteMoeHybridRMSNorm<B> {
     pub fn forward(&self, hidden_states: Tensor<B, 3>) -> Tensor<B, 3> {
+        // RMSNorm: x / sqrt(mean(x^2) + eps) * weight
+        // This matches the HuggingFace implementation exactly
         let variance = hidden_states
             .clone()
             .powf_scalar(2.0)
-            .mean_dim(2)
-            .add_scalar(self.eps)
-            .sqrt();
+            .mean_dim(2)  // mean along last dimension
+            .add_scalar(self.eps);
         
-        let normalized = hidden_states.div(variance.unsqueeze());
+        // rsqrt(variance) = 1/sqrt(variance)  
+        let rsqrt_var = variance.sqrt().recip();
+        
+        let normalized = hidden_states.mul(rsqrt_var.unsqueeze());
+        normalized.mul(self.weight.clone().unsqueeze::<2>().unsqueeze())
+    }
+    
+    /// Gated RMSNorm for Mamba layers
+    /// Applies gate with SiLU activation before normalization
+    pub fn forward_gated(&self, hidden_states: Tensor<B, 3>, gate: Tensor<B, 3>) -> Tensor<B, 3> {
+        // Apply SiLU gating: hidden_states = hidden_states * silu(gate)
+        let gated_states = hidden_states.mul(silu(gate));
+        
+        // Then apply correct RMSNorm (same as forward but on gated states)
+        let variance = gated_states
+            .clone()
+            .powf_scalar(2.0)
+            .mean_dim(2)
+            .add_scalar(self.eps);
+        
+        // rsqrt(variance) = 1/sqrt(variance)  
+        let rsqrt_var = variance.sqrt().recip();
+        
+        let normalized = gated_states.mul(rsqrt_var.unsqueeze());
         normalized.mul(self.weight.clone().unsqueeze::<2>().unsqueeze())
     }
 }
@@ -102,7 +126,7 @@ mod tests {
         let device = test_device();
         let config = GraniteMoeHybridRMSNormConfig {
             dim: 768,
-            eps: 1e-6,
+            eps: 1e-5, // Standardized to 1e-5 to match Python implementation
         };
         
         let norm = config.init::<TestBackend>(&device);

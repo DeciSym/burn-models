@@ -21,6 +21,9 @@ pub struct GraniteMoeHybrid<B: Backend> {
     layers: Vec<GraniteMoeHybridBlock<B>>,
     norm: GraniteMoeHybridRMSNorm<B>,
     lm_head: Linear<B>,
+    // Scaling factors from config
+    embedding_multiplier: f32,
+    logits_scaling: f32,
 }
 
 impl<B: Backend> GraniteMoeHybrid<B> {
@@ -56,6 +59,8 @@ impl<B: Backend> GraniteMoeHybrid<B> {
             layers,
             norm,
             lm_head,
+            embedding_multiplier: config.embedding_multiplier as f32,
+            logits_scaling: config.logits_scaling as f32,
         }
     }
     
@@ -182,22 +187,117 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         }
     }
 
-    pub fn forward(&self, input_ids: Tensor<B, 2, Int>) -> Tensor<B, 3> {
+    pub fn forward(&self, input_ids: Tensor<B, 2, Int>) -> Tensor<B, 3> 
+    where B::FloatElem: PartialOrd + Into<f32> {
+        self.forward_with_debug_mode(input_ids, false)
+    }
+    
+    /// Forward pass with optional debug mode for monitoring layer-by-layer statistics
+    pub fn forward_with_debug_mode(&self, input_ids: Tensor<B, 2, Int>, debug_mode: bool) -> Tensor<B, 3> 
+    where
+        B::FloatElem: PartialOrd + Into<f32> {
         let [_batch_size, _seq_len] = input_ids.dims();
         
-        // 1. Token embeddings
+        // 1. Token embeddings with embedding multiplier
         let mut hidden_states = self.embeddings.forward(input_ids);
         
+        // Apply embedding multiplier
+        hidden_states = hidden_states.mul_scalar(self.embedding_multiplier);
+        
+        if debug_mode {
+            print_tensor_stats("Embeddings", &hidden_states);
+        }
+        
         // 2. Pass through all layers
-        for layer in &self.layers {
+        for (i, layer) in self.layers.iter().enumerate() {
             hidden_states = layer.forward(hidden_states);
+            
+            // DISABLED: Apply safeguard against value explosion in layer outputs
+            // With the gated RMSNorm fix, this should no longer be necessary
+            /*
+            let max_abs = hidden_states.clone().abs().max().into_scalar();
+            // Value explosion check - convert to string then parse as f64 for comparison
+            let max_abs_f64 = max_abs.to_string().parse::<f64>().unwrap_or(0.0);
+            if max_abs_f64 > 50.0 {
+                // More aggressive rescaling for high values
+                if debug_mode {
+                    println!("🛡️ SAFEGUARD: Rescaling layer {} outputs to prevent value explosion (max_abs: {})", i, max_abs);
+                }
+                // Rescale to keep values in reasonable range
+                // Create a scaling factor of 5.0 / max_abs as a scalar
+                let scaling_factor = 5.0 / max_abs_f64;
+                hidden_states = hidden_states.mul_scalar(scaling_factor);
+            }
+            */
+            
+            if debug_mode {
+                let layer_stats = print_tensor_stats(&format!("Layer {}", i), &hidden_states);
+                
+                // Check for value explosion and warn if detected
+                if layer_stats.max_abs > 100.0 {
+                    println!("⚠️ WARNING: High values detected in layer {} (max_abs: {})", i, layer_stats.max_abs);
+                }
+                
+                if layer_stats.is_abnormal {
+                    println!("🚨 CRITICAL: Abnormal values detected in layer {}!", i);
+                }
+            }
         }
         
         // 3. Final layer normalization
         hidden_states = self.norm.forward(hidden_states);
         
+        if debug_mode {
+            print_tensor_stats("Final Normalized", &hidden_states);
+        }
+        
         // 4. Output projection
-        let logits = self.lm_head.forward(hidden_states);
+        let mut logits = self.lm_head.forward(hidden_states);
+        
+        // Apply logits scaling
+        if self.logits_scaling != 1.0 {
+            logits = logits.div_scalar(self.logits_scaling);
+        }
+        
+        // DISABLED: Apply safeguard against value explosion in logits
+        // With the fixes, this should no longer be necessary
+        /*
+        let logits_max_abs = logits.clone().abs().max().into_scalar();
+        // Convert to f64 for comparison
+        let logits_max_abs_f64 = logits_max_abs.to_string().parse::<f64>().unwrap_or(0.0);
+        
+        // Check if we need to normalize the logits
+        let logits = if logits_max_abs_f64 > 50.0 {
+            if debug_mode {
+                println!("🛡️ SAFEGUARD: Rescaling logits to prevent value explosion (max_abs: {})", logits_max_abs);
+            }
+            // Rescale to keep values in reasonable range
+            // Create a scaling factor of 5.0 / max_abs as a scalar 
+            let scaling_factor = 5.0 / logits_max_abs_f64;
+            logits.mul_scalar(scaling_factor)
+        } else if logits_max_abs_f64 < 1e-6 {
+            // If values are too small, scale them up to prevent underflow
+            if debug_mode {
+                println!("🛡️ SAFEGUARD: Rescaling logits to prevent underflow (max_abs: {})", logits_max_abs);
+            }
+            logits.mul_scalar(1e6)
+        } else {
+            logits
+        };
+        */
+        
+        if debug_mode {
+            let logit_stats = print_tensor_stats("Logits (final)", &logits);
+            
+            // Check for remaining issues
+            if logit_stats.max_abs > 100.0 {
+                println!("⚠️ WARNING: Potential value explosion in logits (max_abs: {})", logit_stats.max_abs);
+            }
+            
+            if logit_stats.is_abnormal {
+                println!("🚨 CRITICAL: Abnormal values detected in logits!");
+            }
+        }
         
         logits
     }
@@ -227,8 +327,18 @@ impl<B: Backend> GraniteMoeHybrid<B> {
         &mut self.lm_head
     }
     
+    pub fn lm_head(&self) -> &Linear<B> {
+        &self.lm_head
+    }
+
+    pub fn norm(&self) -> &GraniteMoeHybridRMSNorm<B> {
+        &self.norm
+    }
+    
     pub fn get_lm_head_weight(&self) -> Tensor<B, 2> {
-        self.lm_head.weight.val()
+        // Get a reference to the tensor slice and clone it
+        let tensor_ref: &Tensor<B, 2> = &self.lm_head.weight;
+        tensor_ref.clone()
     }
     
     // Debug forward pass that captures intermediate outputs
@@ -270,6 +380,57 @@ pub struct DebugForwardOutput<B: Backend> {
     pub layer_outputs: Vec<Tensor<B, 3>>,
     pub final_hidden_states: Tensor<B, 3>,
     pub logits: Tensor<B, 3>,
+}
+
+/// Statistics for a tensor during debugging
+#[derive(Debug, Clone)]
+pub struct TensorStats {
+    pub mean: f64,
+    pub std: f64,
+    pub min: f64,
+    pub max: f64,
+    pub max_abs: f64,
+    pub is_abnormal: bool,
+}
+
+/// Print and return statistics for a tensor during debugging
+fn print_tensor_stats<B: Backend, const D: usize>(name: &str, tensor: &Tensor<B, D>) -> TensorStats 
+where 
+    B::FloatElem: std::fmt::Display {
+    // Convert tensor statistics to f64 through string parsing to avoid type issues
+    let mean_str = tensor.clone().mean().into_scalar().to_string();
+    let mean = mean_str.parse::<f64>().unwrap_or(0.0);
+    
+    let variance = tensor.clone().var_mean_bias(0).0;
+    let std_str = variance.sqrt().mean().into_scalar().to_string();
+    let std = std_str.parse::<f64>().unwrap_or(0.0);
+    
+    let min_str = tensor.clone().min().into_scalar().to_string();
+    let min = min_str.parse::<f64>().unwrap_or(0.0);
+    
+    let max_str = tensor.clone().max().into_scalar().to_string();
+    let max = max_str.parse::<f64>().unwrap_or(0.0);
+    
+    let max_abs_str = tensor.clone().abs().max().into_scalar().to_string();
+    let max_abs = max_abs_str.parse::<f64>().unwrap_or(0.0);
+    
+    // Check for suspicious values indicating potential NaN/Inf
+    let is_abnormal = mean.abs() > 1e10 || std > 1e10 || max_abs > 1e10;
+    
+    println!(
+        "{}: mean={:.6}, std={:.6}, min={:.6}, max={:.6}, max_abs={:.6}{}",
+        name, mean, std, min, max, max_abs,
+        if is_abnormal { " ⚠️ ABNORMAL VALUES" } else { "" }
+    );
+    
+    TensorStats {
+        mean,
+        std,
+        min,
+        max,
+        max_abs,
+        is_abnormal,
+    }
 }
 
 #[cfg(test)]

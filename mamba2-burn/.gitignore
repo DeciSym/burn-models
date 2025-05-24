@@ -1,0 +1,11 @@
+/target
+**/*.rs.bk
+Cargo.lock
+*.npy
+*.bin
+*.safetensors
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
